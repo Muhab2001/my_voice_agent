@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "migrate": "node --import tsx src/migrate.ts",
+    "migrate": "bun src/migrate.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
@@ -14,7 +14,6 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   }
 }

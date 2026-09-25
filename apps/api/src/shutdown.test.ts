@@ -13,15 +13,11 @@ test('SIGTERM drains an in-flight request and exits promptly', async () => {
   reservation.close()
   await once(reservation, 'close')
 
-  const child = spawn(
-    'node',
-    ['--import', 'tsx', 'src/testing/shutdown-fixture.ts'],
-    {
-      cwd: new URL('..', import.meta.url).pathname,
-      env: { ...process.env, PORT: String(port) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  )
+  const child = spawn(process.execPath, ['src/testing/shutdown-fixture.ts'], {
+    cwd: new URL('..', import.meta.url).pathname,
+    env: { ...process.env, PORT: String(port) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
   let output = ''
   child.stdout.on('data', (chunk) => {
     output += String(chunk)

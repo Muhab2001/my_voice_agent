@@ -4,7 +4,7 @@ The phase 1 API is implemented. The browser UI and simulated audio from the rest
 
 ## API setup
 
-Requires Bun 1.3.11, Node 22, and Docker Compose for the container workflow. Copy `.env.example` to `.env` and replace `APP_PASSWORD` and `JWT_SIGNING_SECRET` with local values. The JWT secret must be at least 32 characters. `.env` is ignored by Git. `COOKIE_SECURE=false` is for local HTTP only; set it to `true` behind HTTPS.
+Requires Bun 1.3.11 and Docker Compose for the container workflow. Copy `.env.example` to `.env` and replace `APP_PASSWORD` and `JWT_SIGNING_SECRET` with local values. The JWT secret must be at least 32 characters. `.env` is ignored by Git. `COOKIE_SECURE=false` is for local HTTP only; set it to `true` behind HTTPS.
 
 | Variable | Purpose |
 | --- | --- |
@@ -32,7 +32,7 @@ cp .env.example .env
 docker compose --env-file .env -f infra/local/docker-compose.yaml up --build
 ```
 
-The API is at `http://localhost:3000`, Swagger UI at `http://localhost:3000/docs`, and the generated schema at `http://localhost:3000/openapi.json`. Health probes are `/health/live` and `/health/ready`. Readiness returns an overall status plus a flat `resources` map with a short status string for each dependency. API source files are watched in the container. PostgreSQL and Redis bind to loopback ports `5432` and `6379`; their data is retained in named volumes after a normal `down`.
+The API is at `http://localhost:3000`, Swagger UI at `http://localhost:3000/docs`, and the generated schema at `http://localhost:3000/openapi.json`. Health probes are `/health/live` and `/health/ready`. Readiness returns an overall status plus a flat `resources` map with a short status string for each dependency. Rebuild the API container after source changes. PostgreSQL and Redis bind to loopback ports `5432` and `6379`; their data is retained in named volumes after a normal `down`.
 
 For a non-Docker API process, start PostgreSQL and Redis yourself, set the URLs in `.env`, then run:
 
@@ -46,13 +46,3 @@ bun run --cwd apps/api dev
 Use `bun run typecheck`, `bun run lint`, and `bun run test` for checks. `bun run format` applies Biome formatting. The one-off migration command lives in `apps/scripts` and validates only `DATABASE_URL`. To reset **only local Compose data**, stop the stack and remove its named volumes with `docker compose --env-file .env -f infra/local/docker-compose.yaml down --volumes`.
 
 Login with `POST /v1/auth/login` and JSON `{ "password": "..." }`. It returns a 15-minute access JWT and sets a seven-day HttpOnly refresh cookie. `POST /v1/auth/refresh` issues a new access JWT without extending the cookie lifetime. `POST /v1/auth/logout` clears the browser cookie; the client must also discard its access JWT. Because refresh tokens are stateless, a copied token remains valid until it expires or the signing key changes. Cross-origin browser requests need `credentials: 'include'`; the API allows only `ALLOWED_ORIGIN`. Browsers may still block third-party cookies when the Vercel and Render hosts are on different sites, so the deployment should use a same-site API domain or a same-origin proxy if that occurs.
-
-## Plans
-
-- [Architecture, schema, API, and latency design](docs/architecture.md)
-- [Phase 1 — scaffold and simulated audio](plans/01-scaffold.md)
-- [Phase 2 — live Realtime audio](plans/02-realtime-audio.md)
-- [Phase 3 — durable memory and tools](plans/03-memory-and-tools.md)
-- [Phase 4 — Render and Vercel deployment](plans/04-deployment.md)
-
-The phases are ordered. Each plan includes deliverables, an implementation sequence, and acceptance checks. Firebase, user accounts, and concurrent-session quotas are intentionally outside this version.

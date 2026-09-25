@@ -1,6 +1,5 @@
-import type { Server } from 'node:http'
-import { serve } from '@hono/node-server'
 import type { RemoteResource } from '@voice/resource-manager'
+import type { Server } from 'bun'
 import type { createApp } from './app.js'
 
 export type ServerState = { shuttingDown: boolean }
@@ -10,33 +9,31 @@ export function startApiServer(
   resources: RemoteResource<Record<string, string>>,
   port: number,
   state: ServerState,
-): Server {
-  // With no TLS or HTTP/2 options, Hono's Node adapter creates an HTTP Server.
-  const server = serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () =>
-    console.log(`API listening on ${port}`),
-  ) as Server
+): Server<undefined> {
+  const server = Bun.serve({ fetch: app.fetch, port, hostname: '0.0.0.0' })
+  console.log(`API listening on ${port}`)
 
   async function shutdown() {
     if (state.shuttingDown) return
     state.shuttingDown = true
 
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined
-    const drained = new Promise<void>((resolve) =>
-      server.close(() => resolve()),
-    )
+    const drained = server.stop()
     const deadline = new Promise<void>((resolve) => {
       timeoutHandle = setTimeout(() => {
         console.error(
           'Shutdown drain deadline reached; closing remaining connections',
         )
-        server.closeAllConnections()
-        resolve()
+        void server.stop(true).catch(console.error).finally(resolve)
       }, 10_000)
     })
 
-    await Promise.race([drained, deadline])
-    clearTimeout(timeoutHandle)
-    await resources.close()
+    try {
+      await Promise.race([drained, deadline])
+    } finally {
+      clearTimeout(timeoutHandle)
+      await resources.close()
+    }
   }
 
   process.once('SIGTERM', () => {

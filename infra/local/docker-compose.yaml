@@ -36,7 +36,7 @@ services:
       DATABASE_URL: postgres://voice:voice@postgres:5432/voice
       REDIS_URL: redis://redis:6379
     working_dir: /app/apps/scripts
-    command: ["node", "--import", "tsx", "src/migrate.ts"]
+    command: ["bun", "src/migrate.ts"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,13 +52,6 @@ services:
       PORT: "3000"
     ports:
       - "127.0.0.1:3000:3000"
-    volumes:
-      - ../../apps/api/src:/app/apps/api/src
-      - ../../packages/auth/src:/app/packages/auth/src
-      - ../../packages/cache/src:/app/packages/cache/src
-      - ../../packages/contracts/src:/app/packages/contracts/src
-      - ../../packages/database/src:/app/packages/database/src
-      - ../../packages/resource_manager/src:/app/packages/resource_manager/src
     depends_on:
       migrate:
         condition: service_completed_successfully

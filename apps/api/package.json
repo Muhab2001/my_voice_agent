@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch --import tsx src/main.ts",
-    "start": "node --import tsx src/main.ts",
+    "dev": "bun src/main.ts",
+    "start": "bun src/main.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
@@ -16,7 +16,6 @@
     "@voice/contracts": "workspace:*",
     "@voice/database": "workspace:*",
     "@voice/resource-manager": "workspace:*",
-    "@hono/node-server": "^1.19.0",
     "@hono/swagger-ui": "^0.5.0",
     "@hono/zod-openapi": "^0.19.0",
     "@t3-oss/env-core": "^0.13.0",
@@ -24,7 +23,6 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   }
 }
