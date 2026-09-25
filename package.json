@@ -1,0 +1,26 @@
+{
+  "name": "voice-agent",
+  "private": true,
+  "packageManager": "bun@1.3.11",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "migrate": "bun run --cwd apps/scripts migrate",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.9.0",
+    "@types/node": "^22.15.0",
+    "@types/bun": "^1.3.0",
+    "@biomejs/biome": "^2.0.0"
+  }
+}
