@@ -30,7 +30,9 @@ services:
   migrate:
     build:
       context: ../..
-      dockerfile: infra/local/Dockerfile.api
+      dockerfile: infra/local/Dockerfile.app
+      args:
+        TARGET: "@voice/scripts"
     env_file: ../../.env
     environment:
       DATABASE_URL: postgres://voice:voice@postgres:5432/voice
@@ -44,12 +46,16 @@ services:
   api:
     build:
       context: ../..
-      dockerfile: infra/local/Dockerfile.api
+      dockerfile: infra/local/Dockerfile.app
+      args:
+        TARGET: "@voice/api"
     env_file: ../../.env
     environment:
       DATABASE_URL: postgres://voice:voice@postgres:5432/voice
       REDIS_URL: redis://redis:6379
       PORT: "3000"
+    working_dir: /app/apps/api
+    command: ["bun", "src/main.ts"]
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -58,6 +64,24 @@ services:
       redis:
         condition: service_healthy
     stop_grace_period: 15s
+    networks: [internal]
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/local/Dockerfile.app
+      args:
+        TARGET: "@voice/web"
+    environment:
+      VITE_API_PROXY_TARGET: http://api:3000
+    working_dir: /app/apps/web
+    command: ["bun", "run", "dev"]
+    volumes:
+      - ../../apps/web/src:/app/apps/web/src
+      - ../../apps/web/public:/app/apps/web/public
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      - api
     networks: [internal]
 networks:
   internal: {}

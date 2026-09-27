@@ -1,6 +1,6 @@
-# Voice agent
+# Sarjy
 
-The phase 1 API is implemented. The browser UI and simulated audio from the rest of phase 1 are still planned.
+Phase 1 includes the API and a React browser UI with login, a voice session shell, and simulated incoming audio. The web app uses Tailwind CSS and shadcn/ui components. The demo checks microphone permission and controls locally; live conversation arrives in phase 2.
 
 ## API setup
 
@@ -24,6 +24,7 @@ Requires Bun 1.3.11 and Docker Compose for the container workflow. Copy `.env.ex
 | `ALLOWED_ORIGIN` | Browser origin allowed to call the API with credentials. |
 | `PORT` | API port; defaults to `3000`. |
 | `COOKIE_SECURE` | `false` for local HTTP with `SameSite=Lax`; `true` for HTTPS with `SameSite=None; Secure`. Defaults to `true`. |
+| `VITE_API_BASE_URL` | Optional public API origin for a deployed web app. Local Vite uses a same-origin proxy by default. |
 
 Start the API, PostgreSQL, Redis, and one-shot migration with:
 
@@ -32,16 +33,19 @@ cp .env.example .env
 docker compose --env-file .env -f infra/local/docker-compose.yaml up --build
 ```
 
-The API is at `http://localhost:3000`, Swagger UI at `http://localhost:3000/docs`, and the generated schema at `http://localhost:3000/openapi.json`. Health probes are `/health/live` and `/health/ready`. Readiness returns an overall status plus a flat `resources` map with a short status string for each dependency. Rebuild the API container after source changes. PostgreSQL and Redis bind to loopback ports `5432` and `6379`; their data is retained in named volumes after a normal `down`.
+The web app is at `http://localhost:5173`, the API at `http://localhost:3000`, Swagger UI at `http://localhost:3000/docs`, and the generated schema at `http://localhost:3000/openapi.json`. Health probes are `/health/live` and `/health/ready`. Readiness returns an overall status plus a flat `resources` map with a short status string for each dependency. Rebuild the API or web container after source changes. PostgreSQL and Redis bind to loopback ports `5432` and `6379`; their data is retained in named volumes after a normal `down`.
 
 For a non-Docker API process, start PostgreSQL and Redis yourself, set the URLs in `.env`, then run:
 
 ```sh
-bun install --frozen-lockfile
+bun install --frozen-lockfile --linker hoisted
 set -a; . ./.env; set +a
 bun run migrate
 bun run --cwd apps/api dev
+bun run --cwd apps/web dev
 ```
+
+The two `dev` commands run in separate terminals. Vite proxies `/v1` and `/health` to `http://localhost:3000` locally. In Compose, the web service uses the internal API hostname. The UI stores the access token only in memory and restores browser sessions with the HttpOnly refresh cookie. Auth fetching lives in a separate SWR hook under `apps/web/src/hooks`; no global state library is used. The demo transport requests a microphone, supports mute and stop, and plays a bundled sound cue with a brief fading caption. The orb reacts to microphone level and audio playback. It does not send microphone audio to the API or transcribe speech.
 
 Use `bun run typecheck`, `bun run lint`, and `bun run test` for checks. `bun run format` applies Biome formatting. The one-off migration command lives in `apps/scripts` and validates only `DATABASE_URL`. To reset **only local Compose data**, stop the stack and remove its named volumes with `docker compose --env-file .env -f infra/local/docker-compose.yaml down --volumes`.
 

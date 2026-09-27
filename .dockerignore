@@ -3,3 +3,6 @@ dist
 .env
 .git
 .turbo
+.bun-cache
+.tmp
+out
