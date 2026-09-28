@@ -92,10 +92,49 @@ test.skipIf(!url)(
           endMs: 200,
         },
       ])
-      expect((await transcripts.read(session)).map((row) => row.text)).toEqual([
-        'hello ',
+      const second = {
+        ...chunk,
+        id: crypto.randomUUID(),
+        text: 'world',
+        startMs: 50,
+        endMs: 90,
+      }
+      const resumed = {
+        ...chunk,
+        id: crypto.randomUUID(),
+        text: 'again',
+        startMs: 200,
+        endMs: 300,
+      }
+
+      // Insert out of timeline order and replay a committed batch.
+      await transcripts.append([resumed, second])
+      await transcripts.append([second])
+
+      const merged = await transcripts.read(session)
+      expect(merged.map((row) => row.text)).toEqual([
+        'hello world',
         'hi',
+        'again',
       ])
+      expect(merged.map((row) => row.role)).toEqual([
+        'user',
+        'assistant',
+        'user',
+      ])
+      expect(merged[0].id).toBe(chunk.id)
+      expect(merged[0].startMs).toBe(0)
+      expect(merged[0].endMs).toBe(100)
+
+      // Identical speakers in a different session never join this conversation.
+      const otherSession = await sessions.create()
+      await transcripts.append([
+        { ...chunk, id: crypto.randomUUID(), sessionId: otherSession },
+      ])
+      expect(
+        (await transcripts.read(otherSession)).map((row) => row.text),
+      ).toEqual(['hello '])
+      expect(await transcripts.read(crypto.randomUUID())).toEqual([])
     } finally {
       await database.resource.close()
     }

@@ -3,6 +3,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  pgView,
   text,
   timestamp,
   uniqueIndex,
@@ -93,3 +94,14 @@ export const memories = pgTable(
     index('memories_entity_event_idx').on(table.entity, table.eventAt),
   ],
 )
+
+/** Read-only speaker passages assembled from persisted snapshots by the migration-defined view. */
+export const mergedTranscripts = pgView('merged_transcripts', {
+  id: uuid('id').notNull(),
+  sessionId: uuid('session_id').notNull(),
+  role: varchar('role', { length: 16, enum: ['user', 'assistant'] }).notNull(),
+  text: text('text').notNull(),
+  startMs: integer('start_ms').notNull(),
+  endMs: integer('end_ms').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+}).existing()
