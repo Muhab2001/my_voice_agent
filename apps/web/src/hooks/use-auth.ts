@@ -22,7 +22,9 @@ export function useAuth() {
     {
       revalidateOnFocus: false,
       refreshInterval: (session) => {
-        if (!session) return 0
+        if (!session) {
+          return 0
+        }
         return Math.max(
           5_000,
           new Date(session.expiresAt).getTime() -

@@ -1,6 +1,7 @@
 export type VoiceStatus =
   | 'idle'
   | 'connecting'
+  | 'stopping'
   | 'connected'
   | 'paused'
   | 'error'
@@ -21,7 +22,7 @@ export type VoiceTransportEvents = {
 
 export interface VoiceTransport {
   start(): Promise<void>
-  stop(): void
+  stop(): Promise<void>
   setMuted(muted: boolean): void
   playIncoming(): Promise<void>
   pauseIncoming(): void

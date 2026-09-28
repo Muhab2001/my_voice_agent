@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/use-auth'
 export function AuthGate() {
   const { isAuthenticated, isLoading } = useAuth()
   const location = useLocation()
-  if (isLoading)
+  if (isLoading) {
     return (
       <main
         className="flex min-h-svh items-center justify-center gap-3 text-sm text-muted-foreground"
@@ -14,7 +14,9 @@ export function AuthGate() {
         Restoring session…
       </main>
     )
-  if (!isAuthenticated)
+  }
+  if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location.pathname }} replace />
+  }
   return <Outlet />
 }

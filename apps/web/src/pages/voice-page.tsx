@@ -1,4 +1,4 @@
-import { LogOut, Mic, MicOff, Pause, Play } from 'lucide-react'
+import { LogOut, Mic, MicOff, Play, Square } from 'lucide-react'
 import { useState } from 'react'
 import { Brand } from '../components/brand'
 import { LiveCaptions } from '../components/live-captions'
@@ -18,15 +18,15 @@ export function VoicePage() {
   const voice = useVoiceSession()
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const active = voice.status === 'connected' || voice.status === 'connecting'
-  const hasStarted = active || voice.status === 'paused'
+  const hasStarted = active || voice.status === 'stopping'
   const sessionAction = active
-    ? 'Pause session'
-    : voice.status === 'paused'
-      ? 'Resume session'
+    ? 'Stop session'
+    : voice.status === 'stopping'
+      ? 'Stopping session'
       : 'Start session'
 
   async function signOut() {
-    voice.stop()
+    await voice.stop()
     try {
       await logout()
     } catch {
@@ -89,12 +89,13 @@ export function VoicePage() {
                     size="icon"
                     type="button"
                     variant="ghost"
-                    onClick={active ? voice.pause : voice.start}
+                    onClick={active ? voice.stop : voice.start}
+                    disabled={voice.status === 'stopping'}
                     aria-label={sessionAction}
                     className={`size-13 rounded-full border-0 bg-transparent p-0 shadow-none transition-colors duration-200 hover:bg-[#edf2ff] hover:text-primary ${active ? 'text-primary' : 'text-[#77859a]'}`}
                   >
                     {active ? (
-                      <Pause className="size-5 fill-current" />
+                      <Square className="size-5 fill-current" />
                     ) : (
                       <Play className="size-5 fill-current" />
                     )}

@@ -1,26 +1,36 @@
-# Phase 2 — live OpenAI Realtime audio
+# Phase 2 — GPT-Live voice, transcripts, and memory tools
 
-## Goal
+## Goal and decisions
 
-Replace simulated audio with a working two-way voice conversation. No tools or memory calls in this phase.
+Replace simulated audio with GPT-Live over browser WebRTC, using Responses delegation and server-owned memory tools. This plan supersedes conflicting instructions in `docs/architecture.md`; the former phase 3 memory work is included here.
 
-## Work sequence
+- Keep the existing React UI, Hono/Bun API, authentication, and PostgreSQL packages.
+- Use `gpt-live-1` for speech and `gpt-6-luna` as the initial Responses backend. The server owns model configuration and prompts.
+- `OPENAI_API_KEY` is already in the root `.env`. Add it to server env validation and pass it into the service; ensure Compose forwards it to the API. No signup or key-creation step.
+- Browser audio goes directly to OpenAI. One outbound sideband WebSocket per session handles transcripts, tool calls, and session lifecycle on the server.
+- Save transcript text snapshots linked to our local session ID. The backend model decides which memories to save through tools. Use plain entity labels and update memory rows directly on correction. No entity aliases, revision history, memory-management UI, extraction workers, job queue, embeddings, or vector database.
 
-1. Create an OpenAI API project, enable billing/API access as required by the account, create a project-scoped API key, and put it only in the API server's `OPENAI_API_KEY` secret. Check the account's current Realtime model access, limits, and pricing in the OpenAI dashboard. Use the server-owned `DEFAULT_REALTIME_MODEL` (`gpt-realtime-2.1`) for every session; clients do not select a model. The API platform [quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request) covers account/key setup, and the [Realtime WebRTC guide](https://developers.openai.com/api/docs/guides/voice-webrtc) covers connection setup. No Firebase project is needed.
-2. In the browser transport, request microphone permission, create an `RTCPeerConnection`, add the microphone track, attach the remote track to an audio element, establish a data channel for Realtime events, and create an SDP offer. Expose state changes to the same `useVoiceSession` interface from phase 1.
-3. Add authenticated `POST /v1/realtime/sessions` in Hono. Accept `application/sdp`, validate body size and authorization, construct the server-owned Realtime session config with `tool_choice: none`, and forward offer + config to `POST https://api.openai.com/v1/realtime/calls` using the server API key. Return the SDP answer with `application/sdp`; capture the call ID from OpenAI's `Location` header and persist it against the local session. OpenAI recommends this unified interface for simpler/faster browser connections. [Source](https://developers.openai.com/api/docs/guides/voice-webrtc)
-4. Set the remote SDP answer and complete the WebRTC handshake. Show connecting, listening, speaking, interrupted, reconnecting, and failed states. Handle autoplay restrictions, microphone permission denial, device changes, network loss, and cleanup of tracks/peer connection on Stop or page exit. Add `POST /v1/realtime/sessions/{id}/end` for idempotent server cleanup.
-5. Configure input/output audio, a selected voice, and turn detection on the server. Listen to Realtime events for transcript/status UI and interruption behavior. Keep phase 2 free of tools and memory injection so the audio path is easy to debug.
-6. Instrument click-to-connection, speech-end-to-first-audio, session creation errors, and reconnect attempts. Capture request IDs, local session IDs, and OpenAI call IDs in server logs, while redacting content and credentials.
+## Implementation
+
+1. **Create and connect sessions.** Add authenticated `POST /v1/voice/sessions`, accepting the browser SDP offer. Create a local `voice_sessions` row, then call `client.live.create` using the OpenAI SDK with `transport: {type: "webrtc", sdp}` and `delegation: {type: "responses", responses: {model, instructions, tools}}`. Persist the returned `session.id` as `vendor_session_id`; update the existing Realtime model constant/default for Live. Return the SDP answer and local session ID. Replace the simulated transport with WebRTC microphone, remote audio, and data-channel handling behind the existing voice hook. Handle permission denial, autoplay, mute, interruption, errors, and Stop.
+
+2. **Own sidebands in a small session manager.** Construct it once in `main.ts` and inject it into Hono. Attach to `wss://api.openai.com/v1/live/sessions/{session_id}/attach` using server credentials and the same connection headers as creation. Register event handlers immediately; wait for socket open with a timeout before returning the session response. Do not send `session.start` on an attached session. Keep sockets and pending operations in a map keyed by local session ID. If setup fails, close the provider session and record the local failure. A lost sideband must surface as an error and trigger bounded session cleanup.
+
+3. **Save simple transcript snapshots.** Add `transcript_snapshots` in `packages/database`: `id`, `session_id` foreign key, `role` (`user` or `assistant`), `text`, `start_ms`, `end_ms`, and `created_at`; index by session and time. Accumulate `session.input_transcript.delta` and `session.output_transcript.delta` separately, preserving spaces. At a short fixed interval, append each speaker's unsaved text as a new row; flush remaining text on Stop and shutdown. These are text chunks, not completed turns: Live has no transcript-done event. Serialize flushes so chunks are not saved twice. Show captions from the browser data channel; persist from the server sideband only.
+
+4. **Let the model manage memory through functions.** Add a simple `memories` table with `id`, `source_session_id`, `content`, optional entity/event-time metadata, and creation/update timestamps. Keep one shared memory scope matching the existing shared-password installation. Register `search_memory`, `remember_fact`, and `correct_memory` in `delegation.responses.tools`. Implement bounded keyword/entity/time queries and memory saves/corrections in the database package; corrections update the existing row without history tables or supersession chains. Prompt the backend to save durable facts or preferences the user actually states, retrieve relevant memories, and correct existing records rather than duplicate them. Keep conversational style and when to delegate in the Live prompt; put memory rules in the backend prompt. No separate extraction model call.
+
+5. **Execute tools on the sideband.** Dispatch `response.event` envelopes and read completed function items from nested `response.output_item.done`. Validate names and JSON arguments, execute the corresponding server function, and return each result with `response.item.create` containing `function_call_output` and the original `call_id`. Track pending calls per response; send `response.create` after all required results are submitted. Handle errors, deduplicate repeated calls, and keep completed write outcomes so a retry does not save a second memory. Private tool execution stays off the browser.
+
+6. **Stop and shut down cleanly.** Add authenticated, idempotent `POST /v1/voice/sessions/{id}/end`. Stop new work, finish required pending tool results/continuations, register the final-event waiter, send `session.close`, and keep receiving until `session.closed` or a deadline. Save final usage/reason, flush text snapshots, then release sockets and browser media. Record incomplete finalization if the connection closes first. On `SIGTERM`/`SIGINT`, mark draining, reject new sessions (including late session-creation completions), stop reconnects, and drain active sessions concurrently before closing PostgreSQL/Redis. Use one overall deadline that leaves cleanup time inside the deployment shutdown allowance; explicitly cancel or close remaining operations when it expires. Persist memory writes immediately rather than waiting for shutdown.
 
 ## Acceptance checks
 
-- After login, a browser can start a session, speak, and hear a generated spoken reply through WebRTC. The API server is not in the ongoing audio path.
-- The model cannot call tools; no memory records are read or written.
-- Stop releases microphone and peer connection resources. An interrupted response stops or truncates playback correctly; reconnection and errors are visible rather than silently hanging.
-- A bad/expired access JWT never creates an OpenAI call. A valid refresh made before Start avoids an intermittent authorization failure.
-- The OpenAI key is absent from browser code and network responses; only session SDP and safe metadata return to the browser.
+- After login, Start supports a real two-way voice conversation; API keys remain server-only.
+- Both speakers' text snapshots are saved under our local session ID and can be read in order.
+- A stated preference is saved through `remember_fact`, recalled in a fresh session through `search_memory`, and corrected through `correct_memory`.
+- Repeated statements and repeated tool delivery do not duplicate a memory. Keyword/entity/time filters work, corrections replace the current fact, and lookup failures produce an honest spoken fallback. Tool errors and sideband loss are visible.
+- Stop and process shutdown drain pending work, flush transcripts, and release resources within the deadline. An interrupted spoken reply does not silently repeat or cancel a committed memory write.
+- Run relevant typecheck/lint/tests, including session cleanup and tool retry behavior; update the README and architecture notes to reflect the implemented Live path and remove obsolete Realtime, worker/queue, alias, revision-history, and memory-management assumptions.
 
-## Exit artifact
-
-Repeatable live voice demo and a short troubleshooting guide for browser permissions, API access, model selection, WebRTC connection failures, and audio playback.
+References: [WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc), [sideband controls](https://developers.openai.com/api/docs/guides/voice-server-controls), [delegation and tools](https://developers.openai.com/api/docs/guides/live-delegation), [transcripts and graceful close](https://developers.openai.com/api/docs/guides/live-conversations).

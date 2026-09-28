@@ -16,11 +16,15 @@ export function LoginPage() {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  if (isAuthenticated) return <Navigate to="/" replace />
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!password || pending) return
+    if (!password || pending) {
+      return
+    }
     setPending(true)
     setError(null)
     try {

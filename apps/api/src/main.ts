@@ -1,10 +1,17 @@
 import { AuthService } from '@voice/auth'
 import { NewRedisCache } from '@voice/cache'
-import { newDrizzleDatabase } from '@voice/database'
+import {
+  DrizzleMemoryService,
+  DrizzleTranscriptService,
+  DrizzleVoiceSessionService,
+  newDrizzleDatabase,
+} from '@voice/database'
 import { ResourceManager } from '@voice/resource-manager'
 import { createApp } from './app.js'
 import { loadEnv } from './env.js'
 import { type ServerState, startApiServer } from './server.js'
+import { GPTLiveVoiceChatProvider } from './voice/provider.js'
+import { VoiceSessionManager } from './voice/session-manager.js'
 
 const env = loadEnv()
 const database = newDrizzleDatabase({
@@ -38,20 +45,34 @@ if (!startupReport.healthy) {
   )
 }
 
-const auth = new AuthService({
-  password: env.APP_PASSWORD,
-  signingSecret: env.JWT_SIGNING_SECRET,
-  issuer: 'voice-agent',
-  audience: 'voice-agent-api',
-})
+try {
+  const auth = new AuthService({
+    password: env.APP_PASSWORD,
+    signingSecret: env.JWT_SIGNING_SECRET,
+    issuer: 'voice-agent',
+    audience: 'voice-agent-api',
+  })
 
-const state: ServerState = { shuttingDown: false }
-const app = createApp({
-  auth,
-  resources,
-  allowedOrigin: env.ALLOWED_ORIGIN,
-  cookieSecure: env.COOKIE_SECURE === 'true',
-  isShuttingDown: () => state.shuttingDown,
-})
+  const state: ServerState = { shuttingDown: false }
+  const voice = new VoiceSessionManager(
+    new DrizzleVoiceSessionService(database.client),
+    new DrizzleMemoryService(database.client),
+    new DrizzleTranscriptService(database.client),
+    new GPTLiveVoiceChatProvider(env.OPENAI_API_KEY),
+  )
+  const app = createApp({
+    voice,
+    auth,
+    resources,
+    allowedOrigin: env.ALLOWED_ORIGIN,
+    cookieSecure: env.COOKIE_SECURE === 'true',
+    isShuttingDown: () => state.shuttingDown,
+  })
 
-startApiServer(app, resources, env.PORT, state)
+  startApiServer(app, resources, env.PORT, state, voice)
+} catch (error) {
+  await resources
+    .close()
+    .catch((closeError) => console.error('Startup cleanup failed', closeError))
+  throw error
+}

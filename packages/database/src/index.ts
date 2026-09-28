@@ -63,6 +63,7 @@ export function newDrizzleDatabase({
   return { client: drizzle(pool), resource: new DrizzleResource(pool) }
 }
 
-export { DEFAULT_REALTIME_MODEL } from './schema.js'
-export type { VoiceSessionService } from './voice-session-service.js'
-export { DrizzleVoiceSessionService } from './voice-session-service.js'
+export * from './memory-service.js'
+export { DEFAULT_LIVE_MODEL } from './schema.js'
+export * from './transcript-service.js'
+export * from './voice-session-service.js'

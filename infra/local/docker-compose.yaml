@@ -54,6 +54,7 @@ services:
       DATABASE_URL: postgres://voice:voice@postgres:5432/voice
       REDIS_URL: redis://redis:6379
       PORT: "3000"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
     working_dir: /app/apps/api
     command: ["bun", "src/main.ts"]
     ports:

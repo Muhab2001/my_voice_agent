@@ -8,7 +8,9 @@
       "dependsOn": ["^typecheck"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "env": ["TEST_DATABASE_URL"],
+      "cache": false
     },
     "dev": {
       "cache": false,

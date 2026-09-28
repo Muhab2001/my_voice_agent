@@ -1,48 +1,49 @@
 import { describe, expect, test } from 'bun:test'
 import { AuthService } from '@voice/auth'
 import { createApp } from './app.js'
+import { voiceFixture } from './testing/voice-fixture.js'
+import type { VoiceSessionManager } from './voice/session-manager.js'
 
-function fixture() {
-  let ready = true
-  let shuttingDown = false
-  const auth = new AuthService({
+class AppFixture {
+  private ready = true
+  private shuttingDown = false
+
+  readonly auth = new AuthService({
     password: 'correct-password',
     signingSecret: '12345678901234567890123456789012',
     issuer: 'voice-agent',
     audience: 'voice-agent-api',
   })
-  const app = createApp({
-    auth,
+
+  readonly app = createApp({
+    voice: voiceFixture().manager,
+    auth: this.auth,
     resources: {
-      ping: async () => {
-        return {
-          healthy: ready,
-          details: {
-            database: ready ? 'PostgreSQL is reachable' : 'offline',
-          },
-        }
-      },
+      ping: async () => ({
+        healthy: this.ready,
+        details: {
+          database: this.ready ? 'PostgreSQL is reachable' : 'offline',
+        },
+      }),
       close: async () => {},
     },
     allowedOrigin: 'http://localhost:5173',
     cookieSecure: false,
-    isShuttingDown: () => shuttingDown,
+    isShuttingDown: () => this.shuttingDown,
   })
-  return {
-    app,
-    auth,
-    setReady: (value: boolean) => {
-      ready = value
-    },
-    setShuttingDown: (value: boolean) => {
-      shuttingDown = value
-    },
+
+  readonly setReady = (value: boolean) => {
+    this.ready = value
+  }
+
+  readonly setShuttingDown = (value: boolean) => {
+    this.shuttingDown = value
   }
 }
 
 describe('phase 1 API', () => {
   test('liveness, readiness, and generated OpenAPI', async () => {
-    const { app, setReady, setShuttingDown } = fixture()
+    const { app, setReady, setShuttingDown } = new AppFixture()
     expect((await app.request('/health/live')).status).toBe(200)
     const ready = await app.request('/health/ready')
     expect(ready.status).toBe(200)
@@ -69,7 +70,7 @@ describe('phase 1 API', () => {
   })
 
   test('login, refresh, logout, and token types', async () => {
-    const { app, auth } = fixture()
+    const { app, auth } = new AppFixture()
     const bad = await app.request('/v1/auth/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -90,7 +91,9 @@ describe('phase 1 API', () => {
     await expect(auth.verifyRefresh(access.accessToken)).rejects.toThrow()
     const cookie = login.headers.get('set-cookie')?.split(';')[0]
     expect(cookie).toStartWith('voice_refresh=')
-    if (!cookie) throw new Error('Login did not set a refresh cookie')
+    if (!cookie) {
+      throw new Error('Login did not set a refresh cookie')
+    }
     const refresh = await app.request('/v1/auth/refresh', {
       method: 'POST',
       headers: { cookie },
@@ -123,6 +126,7 @@ describe('phase 1 API', () => {
       audience: 'voice-agent-api',
     })
     const app = createApp({
+      voice: voiceFixture().manager,
       auth,
       resources: {
         ping: async () => ({ healthy: true, details: {} }),
@@ -151,7 +155,7 @@ describe('phase 1 API', () => {
   })
 
   test('invalid body receives a structured error', async () => {
-    const { app } = fixture()
+    const { app } = new AppFixture()
     const response = await app.request('/v1/auth/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -166,4 +170,21 @@ describe('phase 1 API', () => {
       response.headers.get('X-Request-Id') ?? '',
     )
   })
+})
+
+test('missing voice runtime fails app construction rather than serving a partial API', () => {
+  const { auth } = new AppFixture()
+  expect(() =>
+    createApp({
+      auth,
+      voice: undefined as unknown as VoiceSessionManager,
+      resources: {
+        ping: async () => ({ healthy: true, details: {} }),
+        close: async () => {},
+      },
+      allowedOrigin: 'http://localhost:5173',
+      cookieSecure: false,
+      isShuttingDown: () => false,
+    }),
+  ).toThrow('Voice session manager is required')
 })

@@ -3,7 +3,7 @@ import { OpenAPIHono } from '@hono/zod-openapi'
 import type { AuthService } from '@voice/auth'
 import type { RemoteResource } from '@voice/resource-manager'
 import { cors } from 'hono/cors'
-import { requestId, requireAllowedOrigin } from './http/middleware.js'
+import { AllowedOrigin, Authenticated, requestId } from './http/middleware.js'
 import {
   errorHandler,
   invalidRequestHook,
@@ -24,8 +24,20 @@ import {
   readyHandler,
   readyRoute,
 } from './routes/health.js'
+import {
+  createVoiceHandler,
+  createVoiceRoute,
+  endVoiceHandler,
+  endVoiceRoute,
+  transcriptsHandler,
+  transcriptsRoute,
+  voiceStatusHandler,
+  voiceStatusRoute,
+} from './routes/voice.js'
+import type { VoiceSessionManager } from './voice/session-manager.js'
 
 export type ApiDependencies = {
+  voice: VoiceSessionManager
   auth: AuthService
   resources: RemoteResource<Record<string, string>>
   allowedOrigin: string
@@ -35,11 +47,16 @@ export type ApiDependencies = {
 
 export function createApp({
   auth,
+  voice,
   resources,
   allowedOrigin,
   cookieSecure,
   isShuttingDown,
 }: ApiDependencies) {
+  if (!voice) {
+    throw new Error('Voice session manager is required')
+  }
+
   const app = new OpenAPIHono<ApiEnv>({ defaultHook: invalidRequestHook })
 
   app.use('*', requestId)
@@ -52,7 +69,9 @@ export function createApp({
       allowMethods: ['GET', 'POST', 'OPTIONS'],
     }),
   )
-  app.use('/v1/auth/*', requireAllowedOrigin(allowedOrigin))
+  app.use('/v1/auth/*', AllowedOrigin(allowedOrigin))
+  app.use('/v1/voice/*', AllowedOrigin(allowedOrigin))
+  app.use('/v1/voice/*', Authenticated(auth))
   app.onError(errorHandler)
   app.notFound(notFoundHandler)
 
@@ -61,6 +80,11 @@ export function createApp({
   app.openapi(loginRoute, loginHandler(auth, { secure: cookieSecure }))
   app.openapi(refreshRoute, refreshHandler(auth))
   app.openapi(logoutRoute, logoutHandler({ secure: cookieSecure }))
+
+  app.openapi(createVoiceRoute, createVoiceHandler(voice, isShuttingDown))
+  app.openapi(endVoiceRoute, endVoiceHandler(voice))
+  app.openapi(voiceStatusRoute, voiceStatusHandler(voice))
+  app.openapi(transcriptsRoute, transcriptsHandler(voice))
 
   app.doc('/openapi.json', {
     openapi: '3.0.0',

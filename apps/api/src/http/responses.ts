@@ -21,7 +21,7 @@ export const invalidRequestHook: Hook<
   }
 }
 
-export function fail<S extends 400 | 401 | 403 | 503>(
+export function fail<S extends 400 | 401 | 403 | 404 | 503>(
   c: Context<ApiEnv>,
   status: S,
   code: string,

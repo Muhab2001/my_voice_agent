@@ -86,6 +86,35 @@ export class ApiClient {
     return schema.parse(await response.json())
   }
 
+  static async post<T>(
+    path: `/${string}`,
+    body: unknown,
+    schema: { parse(value: unknown): T },
+  ): Promise<T> {
+    if (
+      !ApiClient.accessToken ||
+      ApiClient.accessTokenExpiresAt - Date.now() <= AUTH_REFRESH_BUFFER_MS
+    ) {
+      await ApiClient.refresh()
+    }
+    const send = () =>
+      fetchApi({
+        path,
+        method: 'POST',
+        body,
+        accessToken: ApiClient.accessToken,
+      })
+    let response = await send()
+    if (response.status === 401) {
+      await ApiClient.refresh()
+      response = await send()
+    }
+    await assertOk(response)
+    return schema.parse(
+      response.status === 204 ? undefined : await response.json(),
+    )
+  }
+
   static clearAccessToken(): void {
     ApiClient.accessToken = null
     ApiClient.accessTokenExpiresAt = 0

@@ -28,8 +28,12 @@ export async function fetchApi({
   accessToken,
 }: HttpRequestInput): Promise<Response> {
   const headers = new Headers()
-  if (body !== undefined) headers.set('Content-Type', 'application/json')
-  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  if (body !== undefined) {
+    headers.set('Content-Type', 'application/json')
+  }
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`)
+  }
 
   return fetch(`${apiBase}${path}`, {
     method,
@@ -40,7 +44,9 @@ export async function fetchApi({
 }
 
 export async function assertOk(response: Response): Promise<void> {
-  if (response.ok) return
+  if (response.ok) {
+    return
+  }
   const body = errorSchema.safeParse(await response.json().catch(() => null))
   throw new ApiError(
     body.success

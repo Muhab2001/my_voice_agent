@@ -1,10 +1,37 @@
 import { AuthService } from '@voice/auth'
 import { createApp } from '../app.js'
 import { type ServerState, startApiServer } from '../server.js'
+import { functionCall, voiceFixture } from './voice-fixture.js'
+
+const voice = voiceFixture()
+if (process.env.VOICE_SHUTDOWN === 'true') {
+  const { id } = await voice.manager.create('offer')
+  voice.memory.beforeWrite = async () => {
+    await Bun.sleep(150)
+  }
+  voice.socket.event({
+    type: 'session.input_transcript.delta',
+    delta: 'I prefer tea',
+    start_ms: 0,
+    end_ms: 100,
+  })
+  functionCall(voice.socket)
+  voice.socket.response({
+    type: 'response.completed',
+    response: { id: 'response-pending' },
+  })
+  console.log(`Voice session ready: ${id}`)
+}
 
 const resources = {
   ping: async () => ({ healthy: true, details: {} }),
-  close: async () => {},
+  close: async () => {
+    if (process.env.VOICE_SHUTDOWN === 'true') {
+      console.log(
+        `Closed resources after memory=${voice.memory.facts.length} transcript=${voice.transcripts.chunks.size} finalization=${[...voice.sessions.rows.values()][0].finalization}`,
+      )
+    }
+  },
 }
 const state: ServerState = { shuttingDown: false }
 const auth = new AuthService({
@@ -14,6 +41,7 @@ const auth = new AuthService({
   audience: 'voice-agent-api',
 })
 const app = createApp({
+  voice: voice.manager,
   auth,
   resources,
   allowedOrigin: 'http://localhost:5173',
@@ -21,4 +49,4 @@ const app = createApp({
   isShuttingDown: () => state.shuttingDown,
 })
 
-startApiServer(app, resources, Number(process.env.PORT), state)
+startApiServer(app, resources, Number(process.env.PORT), state, voice.manager)

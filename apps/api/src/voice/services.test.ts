@@ -1,0 +1,103 @@
+import { expect, test } from 'bun:test'
+import {
+  DrizzleMemoryService,
+  DrizzleTranscriptService,
+  DrizzleVoiceSessionService,
+  memoryFingerprint,
+  newDrizzleDatabase,
+} from '@voice/database'
+import { runMigrations } from '@voice/database/migrate'
+
+const url = process.env.TEST_DATABASE_URL
+// Opt in against a disposable database: migrations are applied, existing data is retained.
+test.skipIf(!url)(
+  'PostgreSQL migration, deduplication, literal keyword/entity/time lookup and in-place correction',
+  async () => {
+    if (!url) {
+      throw new Error('TEST_DATABASE_URL required')
+    }
+    await runMigrations(url)
+    const database = newDrizzleDatabase({ url })
+    try {
+      const memory = new DrizzleMemoryService(database.client)
+      const transcripts = new DrizzleTranscriptService(database.client)
+      const sessions = new DrizzleVoiceSessionService(database.client)
+      const session = await sessions.create()
+      const tag = crypto.randomUUID()
+      const original = {
+        content: `I prefer tea ${tag}`,
+        entity: tag,
+        event_at: '2026-09-01T12:00:00Z',
+      }
+      const [first, duplicate] = await Promise.all([
+        memory.remember(session, original),
+        memory.remember(session, {
+          ...original,
+          content: ` I PREFER   tea ${tag} `,
+        }),
+      ])
+      expect(first.id).toBe(duplicate.id)
+      expect(memoryFingerprint(original)).toBe(
+        memoryFingerprint({
+          ...original,
+          event_at: '2026-09-01T15:00:00+03:00',
+        }),
+      )
+      const search = {
+        query: `tea ${tag}`,
+        entity: tag.toUpperCase(),
+        from: '2026-09-01T00:00:00Z',
+        to: '2026-09-02T00:00:00Z',
+        limit: 5,
+      }
+      expect((await memory.search(search)).map((row) => row.id)).toEqual([
+        first.id,
+      ])
+      expect(
+        await memory.search({ ...search, from: '2026-09-02T00:00:00Z' }),
+      ).toEqual([])
+      expect(
+        await memory.search({ ...search, entity: `missing-${tag}` }),
+      ).toEqual([])
+      expect(await memory.search({ ...search, query: '%' })).toEqual([])
+      const corrected = await memory.correct(first.id, {
+        ...original,
+        content: `I prefer coffee ${tag}`,
+      })
+      expect(corrected.id).toBe(first.id)
+      expect(await memory.search(search)).toEqual([])
+      expect(
+        (await memory.search({ ...search, query: `coffee ${tag}` }))[0].id,
+      ).toBe(first.id)
+      await expect(
+        memory.correct(crypto.randomUUID(), original),
+      ).rejects.toThrow('does not exist')
+      const chunk = {
+        id: crypto.randomUUID(),
+        sessionId: session,
+        role: 'user' as const,
+        text: 'hello ',
+        startMs: 0,
+        endMs: 100,
+      }
+      await transcripts.append([chunk])
+      await transcripts.append([
+        chunk,
+        {
+          ...chunk,
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          text: 'hi',
+          startMs: 100,
+          endMs: 200,
+        },
+      ])
+      expect((await transcripts.read(session)).map((row) => row.text)).toEqual([
+        'hello ',
+        'hi',
+      ])
+    } finally {
+      await database.resource.close()
+    }
+  },
+)
