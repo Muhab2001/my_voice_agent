@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import {
   doublePrecision,
   index,
@@ -108,6 +109,82 @@ export const userLocation = pgTable(
       .defaultNow(),
   },
   (table) => [index('user_location_recorded_at_idx').on(table.recordedAt)],
+)
+
+export const hotels = pgTable(
+  'hotels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    brandName: varchar('brand_name', { length: 128 }).notNull(),
+    locationName: varchar('location_name', { length: 128 }).notNull(),
+    city: varchar('city', { length: 128 }).notNull(),
+    active: integer('active').notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex('hotels_location_unique').on(
+      table.brandName,
+      table.locationName,
+    ),
+  ],
+)
+
+export const hotelOfferings = pgTable(
+  'hotel_offerings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    hotelId: uuid('hotel_id')
+      .notNull()
+      .references(() => hotels.id),
+    name: varchar('name', { length: 128 }).notNull(),
+    priceSar: integer('price_sar').notNull(),
+    weeklyAvailability: jsonb('weekly_availability')
+      .$type<number[]>()
+      .notNull(),
+    active: integer('active').notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex('hotel_offerings_name_unique').on(table.hotelId, table.name),
+  ],
+)
+
+export type StoredRoom = {
+  offeringId: string
+  name: string
+  quantity: number
+  unitPriceSar: number
+}
+
+export const reservations = pgTable(
+  'reservations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    status: varchar('status', {
+      length: 16,
+      enum: ['draft', 'abandoned', 'confirmed'],
+    })
+      .notNull()
+      .default('draft'),
+    hotelId: uuid('hotel_id').references(() => hotels.id),
+    stayDate: varchar('stay_date', { length: 10 }),
+    guestName: varchar('guest_name', { length: 128 }),
+    rooms: jsonb('rooms').$type<StoredRoom[]>().notNull().default([]),
+    quotedTotalSar: integer('quoted_total_sar'),
+    confirmedTotalSar: integer('confirmed_total_sar'),
+    revision: integer('revision').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('reservations_status_idx').on(table.status),
+    uniqueIndex('reservations_one_draft')
+      .on(table.status)
+      .where(sql`${table.status} = 'draft'`),
+    index('reservations_date_idx').on(table.stayDate),
+  ],
 )
 
 /** Read-only speaker passages assembled from persisted snapshots by the migration-defined view. */

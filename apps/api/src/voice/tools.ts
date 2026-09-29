@@ -1,5 +1,13 @@
 import { placeCategorySchema } from '@voice/contracts'
-import type { LocationService, MemoryService } from '@voice/database'
+import {
+  cityMatchesQuery,
+  type LocationService,
+  type MemoryService,
+  type ReservationService,
+  type ReservationState,
+  todayInBookingTimezone,
+  weekdayForStayDate,
+} from '@voice/database'
 import type { FunctionTool } from 'openai/resources/responses/responses'
 import { z } from 'zod'
 import type { PlacesService } from './places.js'
@@ -102,6 +110,422 @@ export const locationTools: FunctionTool[] = [
     },
   ),
 ]
+
+export const reservationTools: FunctionTool[] = [
+  tool(
+    'get_active_reservation',
+    'Read the current draft and its revision before editing. Read-only.',
+    {},
+  ),
+  tool(
+    'start_reservation',
+    'Start a new hotel reservation draft. This abandons an existing unfinished draft. Save optional known details in the new draft.',
+    {
+      hotel_name: label,
+      stay_date: { type: ['string', 'null'] },
+      guest_name: label,
+      rooms: {
+        type: ['array', 'null'],
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            quantity: { type: 'integer' },
+          },
+          required: ['name', 'quantity'],
+          additionalProperties: false,
+        },
+      },
+    },
+  ),
+  tool(
+    'update_reservation',
+    'Save hotel, exact stay date, guest name, or room selections in any order. Supply the last seen revision. Null means leave a field unchanged. Room selections replace the entire room list.',
+    {
+      reservation_id: { type: 'string', format: 'uuid' },
+      revision: { type: 'integer' },
+      hotel_name: label,
+      stay_date: { type: ['string', 'null'] },
+      guest_name: label,
+      rooms: {
+        type: ['array', 'null'],
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            quantity: { type: 'integer' },
+          },
+          required: ['name', 'quantity'],
+          additionalProperties: false,
+        },
+      },
+    },
+  ),
+  tool(
+    'reservation_options',
+    'Show hotels filtered by city and, when a date is given, room availability; show seven date options or room types without editing a reservation. Use the requested city, including partial names such as Khobar for Al Khobar, or null for all cities.',
+    {
+      field: { type: 'string', enum: ['hotel', 'rooms', 'date'] },
+      city: label,
+      hotel_name: label,
+      stay_date: { type: ['string', 'null'] },
+    },
+  ),
+  tool(
+    'find_reservations',
+    'Search the shared reservation history. Filters combine; upcoming means confirmed stays today or later. Searches never edit a draft.',
+    {
+      upcoming: { type: 'boolean' },
+      city: label,
+      brand: label,
+      status: {
+        type: ['string', 'null'],
+        enum: ['confirmed', 'abandoned', 'draft', null],
+      },
+    },
+  ),
+  tool(
+    'reservation_action',
+    'Abandon, resume, or confirm a selected draft. Confirm only after the customer explicitly agrees to the reviewed hotel, date, rooms, and total. Supply its last seen revision. A changed quote remains a draft and requires fresh approval.',
+    {
+      action: { type: 'string', enum: ['abandon', 'resume', 'confirm'] },
+      reservation_id: { type: 'string', format: 'uuid' },
+      revision: { type: 'integer' },
+    },
+  ),
+]
+
+const startReservationArgs = z
+  .object({
+    hotel_name: nullableLabel,
+    stay_date: z.string().nullable(),
+    guest_name: nullableLabel,
+    rooms: z
+      .array(
+        z
+          .object({
+            name: z.string().trim().min(1),
+            quantity: z.number().int().positive(),
+          })
+          .strict(),
+      )
+      .nullable(),
+  })
+  .strict()
+const updateReservationArgs = startReservationArgs
+  .extend({
+    reservation_id: z.string().uuid(),
+    revision: z.number().int().positive(),
+  })
+  .strict()
+const optionsArgs = z
+  .object({
+    field: z.enum(['hotel', 'rooms', 'date']),
+    city: nullableLabel,
+    hotel_name: nullableLabel,
+    stay_date: z.string().nullable(),
+  })
+  .strict()
+const findArgs = z
+  .object({
+    upcoming: z.boolean(),
+    city: nullableLabel,
+    brand: nullableLabel,
+    status: z.enum(['confirmed', 'abandoned', 'draft']).nullable(),
+  })
+  .strict()
+const actionArgs = z
+  .object({
+    action: z.enum(['abandon', 'resume', 'confirm']),
+    reservation_id: z.string().uuid(),
+    revision: z.number().int().positive(),
+  })
+  .strict()
+
+export async function executeReservationTool(
+  service: ReservationService,
+  ui: UIEventChannel,
+  sessionId: string,
+  name: string,
+  argumentsJson: string,
+) {
+  if (argumentsJson.length > 8192) {
+    throw new Error('Tool arguments are too large')
+  }
+
+  const parsed: unknown = JSON.parse(argumentsJson)
+  const catalog = await service.hotels()
+  const resolveHotel = (name: string | null, choices = catalog) => {
+    if (!name) {
+      return null
+    }
+
+    const matching = choices.filter(
+      (hotel) =>
+        hotel.locationName.toLowerCase() === name.toLowerCase() ||
+        hotel.brandName.toLowerCase() === name.toLowerCase(),
+    )
+
+    if (matching.length === 0) {
+      const cityMatches = choices.filter((hotel) =>
+        cityMatchesQuery(hotel.city, name),
+      )
+
+      if (cityMatches.length > 0) {
+        return cityMatches
+      }
+    }
+
+    return matching.length === 1 ? matching[0] : matching
+  }
+  const publish = (state: ReservationState) => {
+    ui.emit(sessionId, { type: 'reservation-state', reservation: state })
+    return { reservation: state }
+  }
+
+  if (name === 'get_active_reservation') {
+    z.object({}).strict().parse(parsed)
+    const reservation = await service.active()
+
+    if (reservation) {
+      ui.emit(sessionId, { type: 'reservation-state', reservation })
+    }
+
+    return { reservation }
+  }
+
+  if (name === 'reservation_options') {
+    const args = optionsArgs.parse(parsed)
+    const cityQuery = args.city
+    const cityCatalog = cityQuery
+      ? catalog.filter((candidate) =>
+          cityMatchesQuery(candidate.city, cityQuery),
+        )
+      : catalog
+    const hotel = resolveHotel(args.hotel_name, cityCatalog)
+
+    if (args.field === 'hotel') {
+      const hotelName = args.hotel_name
+      const matching = hotelName
+        ? cityCatalog.filter(
+            (candidate) =>
+              candidate.locationName.toLowerCase() ===
+                hotelName.toLowerCase() ||
+              candidate.brandName.toLowerCase() === hotelName.toLowerCase() ||
+              cityMatchesQuery(candidate.city, hotelName),
+          )
+        : cityCatalog
+      const stayDate = args.stay_date
+      let options = matching
+
+      if (stayDate) {
+        weekdayForStayDate(stayDate)
+        const availability = await Promise.all(
+          matching.map(async (candidate) => ({
+            candidate,
+            rooms: await service.offerings(candidate.id, stayDate),
+          })),
+        )
+        options = availability
+          .filter(({ rooms }) => rooms.some((room) => room.available > 0))
+          .map(({ candidate }) => candidate)
+      }
+
+      ui.emit(sessionId, {
+        type: 'reservation-options',
+        kind: 'hotels',
+        options,
+      })
+      return { options }
+    }
+
+    if (args.field === 'date' && hotel && !Array.isArray(hotel)) {
+      const first = args.stay_date ?? todayInBookingTimezone()
+      weekdayForStayDate(first)
+      const base = new Date(`${first}T12:00:00Z`)
+      const options = await Promise.all(
+        Array.from({ length: 7 }, async (_, offset) => {
+          const date = new Date(base.getTime() + offset * 86_400_000)
+            .toISOString()
+            .slice(0, 10)
+          const rooms = await service.offerings(hotel.id, date)
+          return {
+            date,
+            availableRooms: rooms.reduce(
+              (sum, room) => sum + room.available,
+              0,
+            ),
+          }
+        }),
+      )
+      ui.emit(sessionId, {
+        type: 'reservation-options',
+        kind: 'dates',
+        options,
+      })
+      return { options }
+    }
+
+    const kind =
+      !args.hotel_name || !hotel || Array.isArray(hotel) ? 'hotels' : 'rooms'
+    const options =
+      !args.hotel_name || !hotel
+        ? cityCatalog
+        : Array.isArray(hotel)
+          ? hotel.length
+            ? hotel
+            : cityCatalog
+          : args.stay_date
+            ? await service.offerings(hotel.id, args.stay_date)
+            : { message: 'Choose an exact stay date to see availability' }
+    ui.emit(sessionId, { type: 'reservation-options', kind, options })
+    return { options }
+  }
+
+  if (name === 'find_reservations') {
+    const args = findArgs.parse(parsed)
+    const results = await service.list({
+      upcoming: args.upcoming,
+      city: args.city ?? undefined,
+      brand: args.brand ?? undefined,
+      status: args.status ?? undefined,
+    })
+    ui.emit(sessionId, {
+      type: 'reservation-options',
+      kind: 'reservations',
+      options: results,
+    })
+    return { reservations: results }
+  }
+
+  if (name === 'reservation_action') {
+    const args = actionArgs.parse(parsed)
+    return publish(
+      await service[args.action](args.reservation_id, args.revision),
+    )
+  }
+
+  if (name === 'start_reservation' || name === 'update_reservation') {
+    const args =
+      name === 'start_reservation'
+        ? startReservationArgs.parse(parsed)
+        : updateReservationArgs.parse(parsed)
+    const hotel = resolveHotel(args.hotel_name)
+
+    if (Array.isArray(hotel)) {
+      const choices = hotel.length ? hotel : catalog
+      ui.emit(sessionId, {
+        type: 'reservation-options',
+        kind: 'hotels',
+        options: choices,
+      })
+
+      if (name === 'start_reservation') {
+        const reservation = await service.create({
+          ...(args.stay_date ? { stayDate: args.stay_date } : {}),
+          ...(args.guest_name ? { guestName: args.guest_name } : {}),
+        })
+        return {
+          ...publish(reservation),
+          choices,
+          message: 'Choose one hotel location',
+        }
+      }
+
+      return { choices, message: 'Choose one hotel location' }
+    }
+
+    const patch: {
+      hotelId?: string
+      stayDate?: string
+      guestName?: string
+      rooms?: { offeringId: string; quantity: number }[]
+    } = {}
+
+    if (hotel) {
+      patch.hotelId = hotel.id
+    }
+
+    if (args.stay_date) {
+      patch.stayDate = args.stay_date
+    }
+
+    if (args.guest_name) {
+      patch.guestName = args.guest_name
+    }
+
+    if (args.rooms) {
+      const update =
+        name === 'update_reservation'
+          ? (args as z.infer<typeof updateReservationArgs>)
+          : null
+      const current = update ? await service.get(update.reservation_id) : null
+      const hotelId = patch.hotelId ?? current?.hotelId
+      const date = patch.stayDate ?? current?.stayDate
+
+      if (!hotelId || !date) {
+        if (name === 'start_reservation') {
+          return {
+            ...publish(await service.create(patch)),
+            message: 'Choose a hotel and date before rooms',
+          }
+        }
+
+        return { message: 'Choose a hotel and date before rooms' }
+      }
+
+      const offerings = await service.offerings(hotelId, date)
+      const selections: { offeringId: string; quantity: number }[] = []
+
+      for (const room of args.rooms) {
+        const matching = offerings.filter(
+          (offering) => offering.name.toLowerCase() === room.name.toLowerCase(),
+        )
+
+        if (matching.length !== 1) {
+          ui.emit(sessionId, {
+            type: 'reservation-options',
+            kind: 'rooms',
+            options: offerings,
+          })
+
+          if (name === 'start_reservation') {
+            return {
+              ...publish(await service.create(patch)),
+              choices: offerings,
+              message: 'Choose a listed room type',
+            }
+          }
+
+          return { choices: offerings, message: 'Choose a listed room type' }
+        }
+
+        const selected = matching[0]
+
+        if (selected) {
+          selections.push({ offeringId: selected.id, quantity: room.quantity })
+        }
+      }
+
+      patch.rooms = selections
+    }
+
+    if (name === 'update_reservation') {
+      const update = args as z.infer<typeof updateReservationArgs>
+
+      return publish(
+        await service.update(update.reservation_id, {
+          revision: update.revision,
+          ...patch,
+        }),
+      )
+    }
+
+    return publish(await service.create(patch))
+  }
+
+  throw new Error('Unknown reservation tool')
+}
 
 const nearbyArguments = z
   .object({

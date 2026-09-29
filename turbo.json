@@ -9,7 +9,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "env": ["TEST_DATABASE_URL"],
+      "env": ["TEST_DATABASE_URL", "RESERVATION_TEST_DATABASE_URL"],
       "cache": false
     },
     "dev": {

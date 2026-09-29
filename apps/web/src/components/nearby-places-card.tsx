@@ -6,7 +6,7 @@ import {
   Trees,
   UtensilsCrossed,
 } from 'lucide-react'
-import type { PlaceCard } from '../transports/types'
+import type { PlaceCard } from '../ui-events/types'
 import { FloatingCard } from './floating-card'
 
 export function NearbyPlacesCard({

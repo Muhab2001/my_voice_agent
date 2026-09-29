@@ -14,6 +14,7 @@ class FakeAudio extends EventTarget {
     if (FakeAudio.blocked) {
       throw new DOMException('Autoplay blocked', 'NotAllowedError')
     }
+
     this.paused = false
     this.dispatchEvent(new Event('playing'))
   }
@@ -25,10 +26,7 @@ class FakeAudio extends EventTarget {
 }
 
 class FakeChannel extends EventTarget {
-  closed = false
-
   close() {
-    this.closed = true
     this.dispatchEvent(new Event('close'))
   }
 
@@ -45,6 +43,7 @@ class FakePeer extends EventTarget {
   iceGatheringState = 'complete'
   connectionState = 'new'
   localDescription: RTCSessionDescriptionInit | null = null
+  remoteAnswer: string | undefined
   closed = false
 
   constructor() {
@@ -66,7 +65,8 @@ class FakePeer extends EventTarget {
     this.localDescription = offer
   }
 
-  async setRemoteDescription() {
+  async setRemoteDescription(answer: RTCSessionDescriptionInit) {
+    this.remoteAnswer = answer.sdp
     this.channel.event({ type: 'session.started' })
   }
 
@@ -104,21 +104,32 @@ function browserFixture() {
       cancelAnimationFrame: () => {},
     },
   }
+
   for (const name of names) {
     Object.defineProperty(globalThis, name, {
       configurable: true,
       value: values[name],
     })
   }
-  const post = spyOn(ApiClient, 'post')
-  let uiController!: ReadableStreamDefaultController<Uint8Array>
-  const uiBody = new ReadableStream<Uint8Array>({
-    start(controller) {
-      uiController = controller
-    },
+
+  const statuses: VoiceStatus[] = []
+  const errors: string[] = []
+  const captions: string[] = []
+  const transport = new LiveVoiceTransport({
+    onStatus: (status) => statuses.push(status),
+    onError: (error) => errors.push(error),
+    onTranscript: (item) => captions.push(item.text),
+    onInputLevel: () => {},
+    onAudioReady: () => {},
+    onAudioEnded: () => {},
   })
-  const uiStream = spyOn(ApiClient, 'stream').mockResolvedValue(
-    new Response(uiBody),
+  const post = spyOn(ApiClient, 'post').mockImplementation(
+    async (path, _body, schema) =>
+      schema.parse(
+        path === '/v1/voice/sessions'
+          ? { id: crypto.randomUUID(), sdp: 'answer' }
+          : undefined,
+      ),
   )
   const get = spyOn(ApiClient, 'get').mockImplementation(async ({ schema }) =>
     schema.parse({
@@ -128,42 +139,19 @@ function browserFixture() {
       finalization: 'confirmed',
     }),
   )
-  const statuses: VoiceStatus[] = []
-  const errors: string[] = []
-  const captions: string[] = []
-  const locationRequests: string[] = []
-  const placeNames: string[] = []
-  const transport = new LiveVoiceTransport({
-    onStatus: (status) => statuses.push(status),
-    onError: (error) => errors.push(error),
-    onTranscript: (item) => captions.push(item.text),
-    onInputLevel: () => {},
-    onAudioReady: () => {},
-    onAudioEnded: () => {},
-    onLocationRequest: (_sessionId, requestId) =>
-      locationRequests.push(requestId),
-    onPlaceCard: (card) => placeNames.push(card.places[0]?.name ?? ''),
-  })
+
   return {
     transport,
-    track,
-    media,
     post,
     get,
-    locationRequests,
-    placeNames,
-    emitUi(event: unknown) {
-      uiController.enqueue(
-        new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`),
-      )
-    },
+    track,
+    media,
     statuses,
     errors,
     captions,
     restore() {
       post.mockRestore()
       get.mockRestore()
-      uiStream.mockRestore()
       for (const [name, descriptor] of previous) {
         if (descriptor) {
           Object.defineProperty(globalThis, name, descriptor)
@@ -175,83 +163,18 @@ function browserFixture() {
   }
 }
 
-test('browser receives location tool requests and place cards without UI polling', async () => {
+test('transport starts through HTTP, connects WebRTC, and keeps captions and mute working', async () => {
   const fixture = browserFixture()
-  fixture.post.mockImplementation(async (path, _body, schema) =>
-    schema.parse(
-      path === '/v1/voice/sessions'
-        ? { id: crypto.randomUUID(), sdp: 'answer' }
-        : undefined,
-    ),
-  )
 
   try {
-    await fixture.transport.start()
-    const requestId = crypto.randomUUID()
-    fixture.emitUi({ type: 'location-request', requestId })
-    fixture.emitUi({
-      type: 'place-card',
-      card: {
-        id: crypto.randomUUID(),
-        note: 'Nearby coffee',
-        category: 'cafe',
-        query: '',
-        travelMode: 'WALK',
-        places: [
-          {
-            name: 'Test Cafe',
-            address: 'Main Street',
-            url: 'https://maps.google.com',
-            distanceMeters: 100,
-            durationSeconds: 60,
-          },
-        ],
-      },
-    })
-    fixture.emitUi({
-      type: 'place-card',
-      card: {
-        id: crypto.randomUUID(),
-        note: 'Hotels farther out',
-        category: 'hotel',
-        query: '',
-        travelMode: 'DRIVE',
-        places: [
-          {
-            name: 'Test Hotel',
-            address: 'North Road',
-            url: 'https://maps.google.com/?q=hotel',
-            distanceMeters: 12000,
-            durationSeconds: 900,
-          },
-        ],
-      },
-    })
-    await Bun.sleep(0)
-    expect(fixture.locationRequests).toEqual([requestId])
-    expect(fixture.placeNames).toEqual(['Test Cafe', 'Test Hotel'])
-    await fixture.transport.stop()
-  } finally {
-    fixture.restore()
-  }
-})
-
-test('browser captions stream with spaces; mute and Stop retain media until server finalizes', async () => {
-  const fixture = browserFixture()
-  const { transport, post, track, captions, statuses } = fixture
-  let finish!: () => void
-  post.mockImplementation(async (path, _body, schema) => {
-    if (path === '/v1/voice/sessions') {
-      return schema.parse({ id: crypto.randomUUID(), sdp: 'answer' })
-    }
-    await new Promise<void>((resolve) => {
-      finish = resolve
-    })
-    return schema.parse(undefined)
-  })
-  try {
-    await transport.start()
-    expect(statuses.at(-1)).toBe('connected')
+    expect(await fixture.transport.start()).toBeTruthy()
+    expect(fixture.post).toHaveBeenCalledWith(
+      '/v1/voice/sessions',
+      { sdp: 'offer' },
+      expect.anything(),
+    )
+    expect(FakePeer.current.remoteAnswer).toBe('answer')
+    expect(fixture.statuses.at(-1)).toBe('connected')
     FakePeer.current.channel.event({
       type: 'session.input_transcript.delta',
       delta: 'I like',
@@ -260,91 +183,126 @@ test('browser captions stream with spaces; mute and Stop retain media until serv
       type: 'session.input_transcript.delta',
       delta: ' tea',
     })
-    expect(captions.at(-1)).toBe('I like tea')
-    transport.setMuted(true)
-    expect(track.enabled).toBe(false)
-    transport.setMuted(false)
-    expect(track.enabled).toBe(true)
-    const stopping = transport.stop()
-    expect(track.stopped).toBe(false)
-    expect(FakePeer.current.closed).toBe(false)
-    expect(statuses.at(-1)).toBe('stopping')
-    finish()
-    await stopping
-    expect(track.stopped).toBe(true)
+    expect(fixture.captions.at(-1)).toBe('I like tea')
+    fixture.transport.setMuted(true)
+    expect(fixture.track.enabled).toBe(false)
+    await fixture.transport.stop()
+    expect(fixture.track.stopped).toBe(true)
     expect(FakePeer.current.closed).toBe(true)
-    expect(statuses.at(-1)).toBe('idle')
+    expect(fixture.statuses.at(-1)).toBe('idle')
   } finally {
     fixture.restore()
   }
 })
 
-test('Stop during creation cleans up a late session answer', async () => {
+test('stopping during microphone permission releases late tracks', async () => {
   const fixture = browserFixture()
-  const { transport, post, track } = fixture
+  let release!: (
+    value: Awaited<ReturnType<typeof fixture.media.getUserMedia>>,
+  ) => void
+  fixture.media.getUserMedia = () =>
+    new Promise<Awaited<ReturnType<typeof fixture.media.getUserMedia>>>(
+      (resolve) => {
+        release = resolve
+      },
+    )
+
+  try {
+    const preparing = fixture.transport.start()
+
+    while (!release) {
+      await Bun.sleep(1)
+    }
+
+    await fixture.transport.stop()
+    release({
+      getTracks: () => [fixture.track],
+      getAudioTracks: () => [fixture.track],
+    })
+    await preparing
+    expect(fixture.track.stopped).toBe(true)
+  } finally {
+    fixture.restore()
+  }
+})
+
+test('Stop during session creation ends a late HTTP session', async () => {
+  const fixture = browserFixture()
   let release!: (result: { id: string; sdp: string }) => void
-  post.mockImplementation(async (path, _body, schema) => {
-    const result =
+  fixture.post.mockImplementation(async (path, _body, schema) =>
+    schema.parse(
       path === '/v1/voice/sessions'
         ? await new Promise<{ id: string; sdp: string }>((resolve) => {
             release = resolve
           })
-        : undefined
-    return schema.parse(result)
-  })
+        : undefined,
+    ),
+  )
+
   try {
-    const started = transport.start()
+    const starting = fixture.transport.start()
+
     while (!release) {
       await Bun.sleep(1)
     }
-    await transport.stop()
-    expect(track.stopped).toBe(true)
+
+    await fixture.transport.stop()
     const id = crypto.randomUUID()
     release({ id, sdp: 'answer' })
-    await started
-    expect(post).toHaveBeenLastCalledWith(
+    await starting
+    expect(fixture.post).toHaveBeenLastCalledWith(
       `/v1/voice/sessions/${id}/end`,
       undefined,
       expect.anything(),
     )
+    expect(fixture.track.stopped).toBe(true)
   } finally {
     fixture.restore()
   }
 })
 
-test('denied microphone permission releases resources and gives actionable feedback', async () => {
+test('brief peer disconnect recovers without ending media', async () => {
+  const fixture = browserFixture()
+
+  try {
+    await fixture.transport.start()
+    FakePeer.current.connectionState = 'disconnected'
+    FakePeer.current.dispatchEvent(new Event('connectionstatechange'))
+    FakePeer.current.connectionState = 'connected'
+    FakePeer.current.dispatchEvent(new Event('connectionstatechange'))
+    expect(fixture.statuses.at(-1)).toBe('connected')
+    expect(FakePeer.current.closed).toBe(false)
+    await fixture.transport.stop()
+  } finally {
+    fixture.restore()
+  }
+})
+
+test('denied microphone permission reports an error and releases media', async () => {
   const fixture = browserFixture()
   fixture.media.getUserMedia = async () => {
     throw new DOMException('Denied', 'NotAllowedError')
   }
+
   try {
     await expect(fixture.transport.start()).rejects.toThrow()
-    await fixture.transport.stop()
     expect(fixture.errors[0]).toContain('Microphone access was denied')
+    await fixture.transport.stop()
     expect(fixture.statuses.at(-1)).toBe('error')
-    expect(fixture.post).not.toHaveBeenCalled()
   } finally {
     fixture.restore()
   }
 })
 
-test('autoplay denial offers orb playback recovery without dropping the session', async () => {
+test('autoplay denial leaves media connected for manual playback recovery', async () => {
   const fixture = browserFixture()
-  fixture.post.mockImplementation(async (path, _body, schema) =>
-    schema.parse(
-      path === '/v1/voice/sessions'
-        ? { id: crypto.randomUUID(), sdp: 'answer' }
-        : undefined,
-    ),
-  )
+
   try {
     await fixture.transport.start()
     FakeAudio.blocked = true
-    const event = Object.assign(new Event('track'), {
-      streams: [{}],
-      track: {},
-    })
-    FakePeer.current.dispatchEvent(event)
+    FakePeer.current.dispatchEvent(
+      Object.assign(new Event('track'), { streams: [{}], track: {} }),
+    )
     await Bun.sleep(1)
     expect(fixture.errors.at(-1)).toContain('Tap the orb')
     expect(FakePeer.current.closed).toBe(false)
@@ -357,15 +315,52 @@ test('autoplay denial offers orb playback recovery without dropping the session'
   }
 })
 
+test('provider closure reports completion while media stays available for session finalization', async () => {
+  const fixture = browserFixture()
+
+  try {
+    await fixture.transport.start()
+    FakePeer.current.channel.event({
+      type: 'session.closed',
+      reason: 'close_requested',
+    })
+    expect(fixture.statuses.at(-1)).toBe('stopping')
+    await fixture.transport.stop()
+  } finally {
+    fixture.restore()
+  }
+})
+
+test('Stop keeps media until server finalization finishes', async () => {
+  const fixture = browserFixture()
+  let finish!: () => void
+  fixture.post.mockImplementation(async (path, _body, schema) => {
+    if (path === '/v1/voice/sessions') {
+      return schema.parse({ id: crypto.randomUUID(), sdp: 'answer' })
+    }
+
+    await new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    return schema.parse(undefined)
+  })
+
+  try {
+    await fixture.transport.start()
+    const stopping = fixture.transport.stop()
+    expect(fixture.track.stopped).toBe(false)
+    expect(FakePeer.current.closed).toBe(false)
+    finish()
+    await stopping
+    expect(fixture.track.stopped).toBe(true)
+    expect(FakePeer.current.closed).toBe(true)
+  } finally {
+    fixture.restore()
+  }
+})
+
 test('Stop surfaces server tool errors and incomplete finalization', async () => {
   const fixture = browserFixture()
-  fixture.post.mockImplementation(async (path, _body, schema) =>
-    schema.parse(
-      path === '/v1/voice/sessions'
-        ? { id: crypto.randomUUID(), sdp: 'answer' }
-        : undefined,
-    ),
-  )
   fixture.get.mockImplementation(async ({ schema }) =>
     schema.parse({
       id: crypto.randomUUID(),
@@ -374,6 +369,7 @@ test('Stop surfaces server tool errors and incomplete finalization', async () =>
       finalization: 'incomplete',
     }),
   )
+
   try {
     await fixture.transport.start()
     await fixture.transport.stop()

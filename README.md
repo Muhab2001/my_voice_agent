@@ -18,26 +18,21 @@ Requires Bun 1.3.11 and Docker Compose for the container workflow. Copy `.env.ex
 | `DATABASE_CONNECTION_TIMEOUT_MS` | Connection wait timeout; defaults to `3000`. `0` disables it. |
 | `DATABASE_QUERY_TIMEOUT_MS` | Query timeout; defaults to `3000`. `0` disables it. |
 | `DATABASE_MAX_LIFETIME_SECONDS` | Maximum client lifetime; defaults to `0` (disabled). |
-| `REDIS_URL` | Redis URL. Both Redis and PostgreSQL must be reachable before the API starts and while it is ready. |
-| `REDIS_CONNECT_TIMEOUT_MS` | Socket connection timeout; defaults to `5000`. |
-| `REDIS_PING_TIMEOUT_MS` | Readiness ping timeout; defaults to `2000`. |
-| `REDIS_DISABLE_OFFLINE_QUEUE` | Disable queued commands while disconnected; defaults to `false`. |
-| `REDIS_RECONNECT_DELAY_MS` | Optional fixed reconnect delay; unset retains node-redis's backoff strategy. |
 | `ALLOWED_ORIGIN` | Browser origin allowed to call the API with credentials. |
 | `PORT` | API port; defaults to `3000`. |
 | `COOKIE_SECURE` | `false` for local HTTP with `SameSite=Lax`; `true` for HTTPS with `SameSite=None; Secure`. Defaults to `true`. |
 | `VITE_API_BASE_URL` | Optional public API origin for a deployed web app. Local Vite uses a same-origin proxy by default. |
 
-Start the API, PostgreSQL, Redis, and one-shot migration with:
+Start the API, PostgreSQL, and one-shot migration with:
 
 ```sh
 cp .env.example .env
 docker compose --env-file .env -f infra/local/docker-compose.yaml up --build
 ```
 
-The web app is at `http://localhost:5173`, the API at `http://localhost:3000`, Swagger UI at `http://localhost:3000/docs`, and the generated schema at `http://localhost:3000/openapi.json`. Health probes are `/health/live` and `/health/ready`. Readiness returns an overall status plus a flat `resources` map with a short status string for each dependency. Rebuild the API or web container after source changes. PostgreSQL and Redis bind to loopback ports `5432` and `6379`; their data is retained in named volumes after a normal `down`.
+The web app is at `http://localhost:5173`, the API at `http://localhost:3000`, Swagger UI at `http://localhost:3000/docs`, and the generated schema at `http://localhost:3000/openapi.json`. Health probes are `/health/live` and `/health/ready`. Readiness returns an overall status plus a flat `resources` map with a short status string for each dependency. Rebuild the API or web container after source changes. PostgreSQL binds to loopback port `5432`; its data is retained in a named volume after a normal `down`.
 
-For a non-Docker API process, start PostgreSQL and Redis yourself, set the URLs in `.env`, then run:
+For a non-Docker API process, start PostgreSQL yourself, set `DATABASE_URL` in `.env`, then run:
 
 ```sh
 bun install --frozen-lockfile --linker hoisted
@@ -50,6 +45,14 @@ bun run --cwd apps/web dev
 The two `dev` commands run in separate terminals. Vite proxies `/v1` and `/health` to `http://localhost:3000` locally. In Compose, the web service uses the internal API hostname. The UI stores the access token only in memory and restores browser sessions with the HttpOnly refresh cookie. Auth fetching lives in a separate SWR hook under `apps/web/src/hooks`; no global state library is used. Start requests microphone access and connects directly to OpenAI through WebRTC. Mute disables the microphone track while keeping the session active. Stop mutes audio and waits for the server to finish tool results, close the provider session, and flush transcripts before releasing media. Tap the orb if the browser blocks audio autoplay. The assistant handles spoken interruptions; a committed memory write remains saved if speech is interrupted.
 
 Use `bun run typecheck`, `bun run lint`, and `bun run test` for checks. `bun run format` applies Biome formatting. The one-off migration command lives in `apps/scripts` and validates only `DATABASE_URL`. To reset **only local Compose data**, stop the stack and remove its named volumes with `docker compose --env-file .env -f infra/local/docker-compose.yaml down --volumes`.
+
+## Hotel reservations
+
+The migration seeds four hotel locations and three room types per location. Each room type has one randomly chosen unavailable weekday; those counts stay fixed after migration. Booking dates use the `Asia/Riyadh` time zone. The app has one shared reservation history, matching its shared-password login.
+
+Ask the voice assistant to start or change a reservation, see hotel or room options, find confirmed stays, or resume an abandoned draft. Hotel options can be filtered by city, including partial names such as `Khobar` for `Al Khobar`, and, with a date, by room availability. The browser shows floating progress and options cards only when the conversation calls for them. After reviewing the quote, you can confirm by voice or with the browser's **Confirm reservation** button. `GET /v1/reservations/active` restores the latest state after reconnect, and `POST /v1/reservations/{id}/confirm` accepts browser confirmation with the displayed revision. Ending a voice session abandons an unfinished draft.
+
+Run the PostgreSQL state tests with `RESERVATION_TEST_DATABASE_URL` set to an isolated migrated database. The tests cover quote math, unavailable rooms, stale revisions, confirmation rechecks, abandoned drafts, and combined city/brand searches.
 
 Login with `POST /v1/auth/login` and JSON `{ "password": "..." }`. It returns a 15-minute access JWT and sets a seven-day HttpOnly refresh cookie. `POST /v1/auth/refresh` issues a new access JWT without extending the cookie lifetime. `POST /v1/auth/logout` clears the browser cookie; the client must also discard its access JWT. Because refresh tokens are stateless, a copied token remains valid until it expires or the signing key changes. Cross-origin browser requests need `credentials: 'include'`; the API allows only `ALLOWED_ORIGIN`. Browsers may still block third-party cookies when the Vercel and Render hosts are on different sites, so the deployment should use a same-site API domain or a same-origin proxy if that occurs.
 

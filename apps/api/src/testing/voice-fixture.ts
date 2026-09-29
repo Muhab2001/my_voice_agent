@@ -1,10 +1,15 @@
 import type {
   Coordinates,
+  HotelOption,
   LocationService,
   Memory,
   MemoryInput,
   MemoryQuery,
   MemoryService,
+  OfferingOption,
+  ReservationPatch,
+  ReservationService,
+  ReservationState,
   SavedLocation,
   SessionUpdate,
   Snapshot,
@@ -204,6 +209,102 @@ export class TestPlacesService implements PlacesService {
   }
 }
 
+/** Explicit reservation dependency for voice tests that do not exercise booking. */
+export class TestReservationService implements ReservationService {
+  rows = new Map<string, ReservationState>()
+  abandoned: string[] = []
+  hotelOptions: HotelOption[] = []
+  offeringOptions: OfferingOption[] = []
+
+  async hotels() {
+    return this.hotelOptions
+  }
+
+  async offerings(hotelId: string, _date: string) {
+    return this.offeringOptions.filter(
+      (offering) => offering.hotelId === hotelId,
+    )
+  }
+
+  async get(id: string): Promise<ReservationState | null> {
+    return this.rows.get(id) ?? null
+  }
+
+  async active(): Promise<ReservationState | null> {
+    return [...this.rows.values()].find((row) => row.status === 'draft') ?? null
+  }
+
+  async list(): Promise<ReservationState[]> {
+    return [...this.rows.values()]
+  }
+
+  async create(
+    patch: Omit<ReservationPatch, 'revision'> = {},
+  ): Promise<ReservationState> {
+    for (const row of this.rows.values()) {
+      if (row.status === 'draft') {
+        this.rows.set(row.id, {
+          ...row,
+          status: 'abandoned',
+          revision: row.revision + 1,
+        })
+      }
+    }
+
+    const state: ReservationState = {
+      id: crypto.randomUUID(),
+      status: 'draft',
+      hotelId: patch.hotelId ?? null,
+      hotel: null,
+      city: null,
+      brand: null,
+      stayDate: patch.stayDate ?? null,
+      guestName: patch.guestName ?? null,
+      rooms: [],
+      quotedTotalSar: null,
+      confirmedTotalSar: null,
+      nextMissingField: 'hotel',
+      reason: null,
+      revision: 1,
+      updatedAt: new Date().toISOString(),
+    }
+    this.rows.set(state.id, state)
+    return state
+  }
+
+  async update(
+    _id: string,
+    _patch: ReservationPatch,
+  ): Promise<ReservationState> {
+    throw new Error('Reservation not configured in this fixture')
+  }
+
+  async confirm(_id: string, _revision: number): Promise<ReservationState> {
+    throw new Error('Reservation not configured in this fixture')
+  }
+
+  async abandon(id: string): Promise<ReservationState> {
+    const row = this.rows.get(id)
+
+    if (!row) {
+      throw new Error('Reservation not found')
+    }
+
+    const updated = {
+      ...row,
+      status: 'abandoned' as const,
+      revision: row.revision + 1,
+    }
+    this.rows.set(id, updated)
+    this.abandoned.push(id)
+    return updated
+  }
+
+  async resume(): Promise<ReservationState> {
+    throw new Error('Reservation not configured in this fixture')
+  }
+}
+
 export function voiceFixture(options: VoiceSessionManagerOptions = {}) {
   const sessions = new TestVoiceSessionService()
   const memory = new TestMemoryService()
@@ -212,6 +313,7 @@ export function voiceFixture(options: VoiceSessionManagerOptions = {}) {
   const provider = new TestVoiceChatProvider(socket)
   const location = new TestLocationService()
   const places = new TestPlacesService()
+  const reservations = new TestReservationService()
   const manager = new VoiceSessionManager(
     sessions,
     memory,
@@ -219,6 +321,7 @@ export function voiceFixture(options: VoiceSessionManagerOptions = {}) {
     provider,
     location,
     places,
+    reservations,
     {
       endTimeoutMs: 200,
       ...options,
@@ -232,6 +335,7 @@ export function voiceFixture(options: VoiceSessionManagerOptions = {}) {
     provider,
     location,
     places,
+    reservations,
     manager,
     hangups: provider.hangups,
   }
@@ -241,7 +345,7 @@ export function functionCall(
   socket: TestSocket,
   callId = 'call-1',
   name = 'remember_fact',
-  args = { content: 'I prefer tea', entity: 'user', event_at: null },
+  args: unknown = { content: 'I prefer tea', entity: 'user', event_at: null },
 ) {
   socket.response({
     type: 'response.output_item.done',

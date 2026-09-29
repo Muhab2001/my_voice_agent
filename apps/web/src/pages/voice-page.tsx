@@ -1,9 +1,10 @@
 import { LogOut, Mic, MicOff, Play, Square } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Brand } from '../components/brand'
 import { LiveCaptions } from '../components/live-captions'
 import { LocationControl } from '../components/location-control'
 import { NearbyPlacesCard } from '../components/nearby-places-card'
+import { ReservationPanel } from '../components/reservation-panel'
 import { Button } from '../components/ui/button'
 import {
   Tooltip,
@@ -14,13 +15,30 @@ import {
 import { VoiceOrb } from '../components/voice-orb'
 import { useAuth } from '../hooks/use-auth'
 import { useLocationTracking } from '../hooks/use-location-tracking'
+import { useReservation } from '../hooks/use-reservation'
 import { useVoiceSession } from '../hooks/use-voice-session'
+import { useVoiceUiEvents } from '../hooks/use-voice-ui-events'
 
 export function VoicePage() {
   const { logout } = useAuth()
   const location = useLocationTracking()
-  const voice = useVoiceSession(undefined, location.requestFromTool)
-  const placeCard = voice.placeCard
+  const reservation = useReservation()
+  const voice = useVoiceSession()
+  const ui = useVoiceUiEvents(
+    location.requestFromTool,
+    reservation.receiveState,
+    reservation.receiveOptions,
+  )
+  useEffect(() => {
+    if (voice.status === 'idle' || voice.status === 'error') {
+      ui.stop()
+    }
+
+    if (voice.status === 'connected' || voice.status === 'idle') {
+      void reservation.refresh()
+    }
+  }, [voice.status, reservation.refresh, ui.stop])
+  const placeCard = ui.placeCard
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const active = voice.status === 'connected' || voice.status === 'connecting'
   const hasStarted = active || voice.status === 'stopping'
@@ -30,8 +48,22 @@ export function VoicePage() {
       ? 'Stopping session'
       : 'Start session'
 
-  async function signOut() {
+  async function startSession() {
+    reservation.hide()
+    const sessionId = await voice.start()
+
+    if (sessionId) {
+      await ui.start(sessionId)
+    }
+  }
+
+  async function stopSession() {
+    ui.stop()
     await voice.stop()
+  }
+
+  async function signOut() {
+    await stopSession()
     try {
       await logout()
     } catch {
@@ -43,7 +75,7 @@ export function VoicePage() {
 
   return (
     <TooltipProvider skipDelayDuration={0}>
-      <div className="flex min-h-svh flex-col overflow-hidden bg-[#f7f8fb]">
+      <div className="flex min-h-svh flex-col bg-[#f7f8fb]">
         <header className="mx-auto flex w-full max-w-[1190px] items-center justify-between px-6 py-7 sm:px-9">
           <Brand />
           <div className="flex items-center gap-2">
@@ -97,7 +129,7 @@ export function VoicePage() {
                     size="icon"
                     type="button"
                     variant="ghost"
-                    onClick={active ? voice.stop : voice.start}
+                    onClick={active ? stopSession : startSession}
                     disabled={voice.status === 'stopping'}
                     aria-label={sessionAction}
                     className={`size-13 rounded-full border-0 bg-transparent p-0 shadow-none transition-colors duration-200 hover:bg-[#edf2ff] hover:text-primary ${active ? 'text-primary' : 'text-[#77859a]'}`}
@@ -138,20 +170,21 @@ export function VoicePage() {
               </Tooltip>
             </div>
           </div>
-          {(voice.error || logoutError) && (
+          {(voice.error || ui.error || logoutError) && (
             <p
               className="mt-7 max-w-sm text-center text-sm text-destructive"
               role="alert"
             >
-              {voice.error || logoutError}
+              {voice.error || ui.error || logoutError}
             </p>
           )}
+          {reservation.visible && <ReservationPanel {...reservation} />}
         </main>
         {placeCard && (
           <NearbyPlacesCard
             key={placeCard.id}
             card={placeCard}
-            onDismiss={voice.dismissPlaceCard}
+            onDismiss={ui.dismissPlaceCard}
           />
         )}
       </div>

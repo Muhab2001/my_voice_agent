@@ -10,6 +10,9 @@ test('voice and memory configuration stays server-owned; frontend cannot receive
   }
 
   expect(liveConfig.delegation.responses.model).toBe('gpt-6-luna')
+  expect(liveConfig.delegation.responses.instructions).toContain(
+    'When the customer confirms by voice, call reservation_action with action confirm',
+  )
 
   expect(
     liveConfig.delegation.responses.tools?.map((tool) =>
@@ -21,6 +24,12 @@ test('voice and memory configuration stays server-owned; frontend cannot receive
     'correct_memory',
     'get_user_location',
     'find_nearby_places',
+    'get_active_reservation',
+    'start_reservation',
+    'update_reservation',
+    'reservation_options',
+    'find_reservations',
+    'reservation_action',
   ])
 
   expect(liveConfig.client?.data_channel.allowed_client_events).toEqual([])

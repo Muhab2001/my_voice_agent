@@ -181,3 +181,43 @@ test('closing a channel session ends subscribers and resolves a pending location
   channel.closeSession(sessionId)
   expect(closed).toBe(1)
 })
+
+test('late UI subscribers receive the latest options and active location request', async () => {
+  const channel = new UIEventChannel()
+  const sessionId = crypto.randomUUID()
+  channel.emit(sessionId, {
+    type: 'reservation-options',
+    kind: 'hotels',
+    options: { message: 'First' },
+  })
+  channel.emit(sessionId, {
+    type: 'reservation-options',
+    kind: 'hotels',
+    options: { message: 'Latest' },
+  })
+  const pending = channel.requestLocation(sessionId)
+  const events: unknown[] = []
+  channel.subscribe(
+    sessionId,
+    (event) => events.push(event),
+    () => {},
+  )
+
+  expect(events).toEqual([
+    {
+      type: 'reservation-options',
+      kind: 'hotels',
+      options: { message: 'Latest' },
+    },
+    { type: 'location-request', requestId: channel.requestId(sessionId) },
+  ])
+  channel.closeSession(sessionId)
+  expect(await pending).toEqual({ status: 'denied' })
+  const afterClose: unknown[] = []
+  channel.subscribe(
+    sessionId,
+    (event) => afterClose.push(event),
+    () => {},
+  )
+  expect(afterClose).toEqual([])
+})

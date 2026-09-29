@@ -43,6 +43,7 @@ const auth = new AuthService({
 const app = createApp({
   voice: voice.manager,
   location: voice.location,
+  reservations: voice.reservations,
   auth,
   resources,
   allowedOrigin: 'http://localhost:5173',

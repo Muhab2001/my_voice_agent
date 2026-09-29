@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LiveVoiceTransport } from '../transports/live-voice-transport'
 import type {
-  PlaceCard,
   TranscriptItem,
   VoiceStatus,
   VoiceTransport,
@@ -11,9 +10,9 @@ import type {
 const createLiveTransport: VoiceTransportFactory = (events) =>
   new LiveVoiceTransport(events)
 
+/** Owns WebRTC and voice lifecycle; browser UI events have a separate hook. */
 export function useVoiceSession(
   createTransport: VoiceTransportFactory = createLiveTransport,
-  onLocationRequest?: (sessionId: string, requestId: string) => void,
 ) {
   const transport = useRef<VoiceTransport | null>(null)
   const [status, setStatus] = useState<VoiceStatus>('idle')
@@ -23,17 +22,20 @@ export function useVoiceSession(
   const [inputLevel, setInputLevel] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [transcript, setTranscript] = useState<TranscriptItem[]>([])
-  const [placeCard, setPlaceCard] = useState<PlaceCard | null>(null)
 
   const stop = useCallback(async () => {
     const current = transport.current
+
     if (!current) {
       return
     }
+
     await current.stop()
+
     if (transport.current !== current) {
       return
     }
+
     transport.current = null
     setTranscript([])
     setAudioPlaying(false)
@@ -54,16 +56,19 @@ export function useVoiceSession(
     if (transport.current) {
       return
     }
+
     setError(null)
     setTranscript([])
-    setPlaceCard(null)
     setAudioReady(false)
+
     const next = createTransport({
       onStatus: (value) => {
         if (transport.current !== next) {
           return
         }
+
         setStatus(value)
+
         if (value === 'idle' || value === 'error') {
           transport.current = null
           setTranscript([])
@@ -87,6 +92,7 @@ export function useVoiceSession(
         if (transport.current !== next) {
           return
         }
+
         setAudioReady(true)
         setAudioPlaying(true)
       },
@@ -99,27 +105,23 @@ export function useVoiceSession(
         if (transport.current !== next) {
           return
         }
+
         setError(message)
         setAudioPlaying(next.isPlaying())
       },
-      onPlaceCard: (card) => {
-        if (transport.current === next) {
-          setPlaceCard(card)
-        }
-      },
-      onLocationRequest: (sessionId, requestId) => {
-        if (transport.current === next) {
-          onLocationRequest?.(sessionId, requestId)
-        }
-      },
     })
     transport.current = next
+
     try {
-      await next.start()
+      const sessionId = await next.start()
+
+      if (transport.current === next) {
+        return sessionId
+      }
     } catch {
       await next.stop()
     }
-  }, [createTransport, onLocationRequest])
+  }, [createTransport])
 
   const toggleMute = useCallback(() => {
     setMuted((value) => {
@@ -130,9 +132,11 @@ export function useVoiceSession(
 
   const replayAudio = useCallback(async () => {
     const current = transport.current
+
     if (!current || !audioReady || current.isPlaying()) {
       return
     }
+
     try {
       await current.playIncoming()
       setAudioPlaying(true)
@@ -150,8 +154,6 @@ export function useVoiceSession(
     inputLevel,
     error,
     transcript,
-    placeCard,
-    dismissPlaceCard: () => setPlaceCard(null),
     start,
     stop,
     toggleMute,

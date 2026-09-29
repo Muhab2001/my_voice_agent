@@ -1,7 +1,7 @@
 import { swaggerUI } from '@hono/swagger-ui'
 import { OpenAPIHono } from '@hono/zod-openapi'
 import type { AuthService } from '@voice/auth'
-import type { LocationService } from '@voice/database'
+import type { LocationService, ReservationService } from '@voice/database'
 import type { RemoteResource } from '@voice/resource-manager'
 import { cors } from 'hono/cors'
 import { AllowedOrigin, Authenticated, requestId } from './http/middleware.js'
@@ -32,6 +32,12 @@ import {
   saveLocationRoute,
 } from './routes/location.js'
 import {
+  activeReservationHandler,
+  activeReservationRoute,
+  confirmReservationHandler,
+  confirmReservationRoute,
+} from './routes/reservations.js'
+import {
   createVoiceHandler,
   createVoiceRoute,
   endVoiceHandler,
@@ -47,6 +53,7 @@ import type { VoiceSessionManager } from './voice/session-manager.js'
 export type ApiDependencies = {
   voice: VoiceSessionManager
   location: LocationService
+  reservations: ReservationService
   auth: AuthService
   resources: RemoteResource<Record<string, string>>
   allowedOrigin: string
@@ -58,6 +65,7 @@ export function createApp({
   auth,
   voice,
   location,
+  reservations,
   resources,
   allowedOrigin,
   cookieSecure,
@@ -65,6 +73,10 @@ export function createApp({
 }: ApiDependencies) {
   if (!voice) {
     throw new Error('Voice session manager is required')
+  }
+
+  if (!reservations) {
+    throw new Error('Reservation service is required')
   }
 
   const app = new OpenAPIHono<ApiEnv>({ defaultHook: invalidRequestHook })
@@ -84,6 +96,8 @@ export function createApp({
   app.use('/v1/voice/*', Authenticated(auth))
   app.use('/v1/location', AllowedOrigin(allowedOrigin))
   app.use('/v1/location', Authenticated(auth))
+  app.use('/v1/reservations*', AllowedOrigin(allowedOrigin))
+  app.use('/v1/reservations*', Authenticated(auth))
   app.onError(errorHandler)
   app.notFound(notFoundHandler)
 
@@ -101,6 +115,8 @@ export function createApp({
   app.openapi(saveLocationRoute, saveLocationHandler(location))
   app.openapi(locationToolReplyRoute, locationToolReplyHandler(voice, location))
   app.get('/v1/voice/sessions/:id/ui-events', voiceUiEventsHandler(voice))
+  app.openapi(activeReservationRoute, activeReservationHandler(reservations))
+  app.openapi(confirmReservationRoute, confirmReservationHandler(reservations))
 
   app.doc('/openapi.json', {
     openapi: '3.0.0',

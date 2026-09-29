@@ -1,7 +1,10 @@
 import { expect, test } from 'bun:test'
 import { AuthService } from '@voice/auth'
 import { createApp } from '../app.js'
-import { voiceFixture } from '../testing/voice-fixture.js'
+import {
+  TestReservationService,
+  voiceFixture,
+} from '../testing/voice-fixture.js'
 
 test('voice routes authenticate, validate, expose local transcripts and reject creation while draining', async () => {
   const { manager, socket, location } = voiceFixture()
@@ -16,6 +19,7 @@ test('voice routes authenticate, validate, expose local transcripts and reject c
     auth,
     voice: manager,
     location,
+    reservations: new TestReservationService(),
     resources: {
       ping: async () => ({ healthy: true, details: {} }),
       close: async () => {},

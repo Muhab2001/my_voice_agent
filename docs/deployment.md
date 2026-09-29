@@ -1,6 +1,6 @@
 # Deploy Sarjy to Render and Vercel
 
-The Render Blueprint provisions the Bun API, PostgreSQL, and Key Value. Vercel
+The Render Blueprint provisions the Bun API and PostgreSQL. Vercel
 builds the Vite UI from `apps/web`, with shared workspace packages available
 from the repository. Requests to `/v1/*` and
 `/health/*` pass through Vercel to Render, so the browser sees one origin.
@@ -17,7 +17,7 @@ Blueprint or a Vercel Git deployment. If `gh auth status` fails, run
 
 1. In the Render dashboard, choose **New → Blueprint**, connect the GitHub
    repository, and choose the branch containing `render.yaml`. Review the
-   three resources and their instance plans before applying.
+   two resources and their instance plans before applying.
 2. Supply the requested server secrets: `OPENAI_API_KEY`,
    `GOOGLE_MAPS_API_KEY`, and `APP_PASSWORD` (at least 12 characters). Render
    generates `JWT_SIGNING_SECRET`. Never put these values in Vercel or Git.
@@ -33,11 +33,12 @@ The Docker start command runs `bun run migrate` before the API starts. This
 also applies future database migrations on restart or deploy. A failed
 migration stops the API instead of serving incompatible code.
 
-The Blueprint uses free Render plans for the API and PostgreSQL, and the
-smallest paid Key Value plan (`256mb`, currently $10/month). Free PostgreSQL
+The Blueprint uses free Render plans for the API and PostgreSQL. Free PostgreSQL
 expires after 30 days; upgrade its plan before expiry if reservation data must
-be retained. Upgrading an existing free Key Value instance restarts it and
-discards its current contents.
+be retained. If a previous Blueprint already created `sarjy-redis`, remove that
+existing Key Value service in Render after deploying this change to stop its
+charges. Removing it from `render.yaml` does not itself verify that the live
+service was deleted.
 
 ## 3. Create the Vercel project
 
@@ -70,7 +71,7 @@ are required.
 ## 4. Verify the public app
 
 1. Visit `<vercel-origin>/health/ready`; it should show an `ok` status with
-   PostgreSQL and Redis reachable. This checks the Vercel proxy as well as
+   PostgreSQL reachable. This checks the Vercel proxy as well as
    the API. If it returns the web app's `index.html`, the API route is falling
    through to the SPA route; check the project's deployment and
    `RENDER_API_ORIGIN` setting.

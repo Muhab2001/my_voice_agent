@@ -3,6 +3,7 @@ import type { MemoryService } from '@voice/database'
 import {
   eventually,
   functionCall,
+  TestReservationService,
   voiceFixture,
 } from '../testing/voice-fixture.js'
 import { VoiceSessionManager } from './session-manager.js'
@@ -58,6 +59,113 @@ test('saves both speakers under the local ID, preserving spaces and final usage'
   expect(
     socket.sent.filter((event) => event.type === 'session.close'),
   ).toHaveLength(1)
+})
+
+test('ending an older session does not abandon a newer reservation draft', async () => {
+  const { manager, socket, reservations } = voiceFixture()
+  const { id } = await manager.create('offer')
+  functionCall(socket, 'reservation-start', 'start_reservation', {
+    hotel_name: null,
+    stay_date: null,
+    guest_name: 'Amina',
+    rooms: null,
+  })
+  socket.response({
+    type: 'response.completed',
+    response: { id: 'reservation-response' },
+  })
+  await eventually(() =>
+    socket.sent.some(
+      (event) =>
+        event.type === 'response.item.create' &&
+        (event.item as { call_id?: string })?.call_id === 'reservation-start',
+    ),
+  )
+  const first = [...reservations.rows.values()][0]
+  expect(first).toBeDefined()
+  const newer = await reservations.create()
+  await manager.end(id)
+  expect(reservations.abandoned).not.toContain(newer.id)
+  expect((await reservations.get(newer.id))?.status).toBe('draft')
+})
+
+test('ending a session abandons the draft it created', async () => {
+  const { manager, socket, reservations } = voiceFixture()
+  const { id } = await manager.create('offer')
+  functionCall(socket, 'reservation-start', 'start_reservation', {
+    hotel_name: null,
+    stay_date: null,
+    guest_name: null,
+    rooms: null,
+  })
+  socket.response({
+    type: 'response.completed',
+    response: { id: 'reservation-response' },
+  })
+  await eventually(() =>
+    socket.sent.some(
+      (event) =>
+        event.type === 'response.item.create' &&
+        (event.item as { call_id?: string })?.call_id === 'reservation-start',
+    ),
+  )
+  const draft = [...reservations.rows.values()][0]
+  expect(draft).toBeDefined()
+  await manager.end(id)
+  expect(reservations.abandoned).toContain(draft?.id)
+})
+
+test('reservation updates reach the reservation service and publish saved state', async () => {
+  const { manager, socket, reservations } = voiceFixture()
+  const draft = await reservations.create()
+  reservations.update = async (key, patch) => {
+    const current = await reservations.get(key)
+
+    if (!current) {
+      throw new Error('Reservation not found')
+    }
+
+    const updated = {
+      ...current,
+      guestName: patch.guestName ?? current.guestName,
+      revision: current.revision + 1,
+    }
+    reservations.rows.set(key, updated)
+    return updated
+  }
+  const { id } = await manager.create('offer')
+  functionCall(socket, 'reservation-update', 'update_reservation', {
+    reservation_id: draft.id,
+    revision: draft.revision,
+    hotel_name: null,
+    stay_date: null,
+    guest_name: 'Amina',
+    rooms: null,
+  })
+  socket.response({
+    type: 'response.completed',
+    response: { id: 'reservation-response' },
+  })
+  await eventually(() =>
+    socket.sent.some(
+      (event) =>
+        event.type === 'response.item.create' &&
+        (event.item as { call_id?: string })?.call_id === 'reservation-update',
+    ),
+  )
+
+  expect((await reservations.get(draft.id))?.guestName).toBe('Amina')
+  expect((await manager.status(id))?.error).toBeNull()
+  const output = socket.sent.find(
+    (event) =>
+      event.type === 'response.item.create' &&
+      (event.item as { call_id?: string })?.call_id === 'reservation-update',
+  )?.item as { output: string }
+  expect(JSON.parse(output.output)).toMatchObject({
+    ok: true,
+    reservation: { id: draft.id, guestName: 'Amina' },
+  })
+  await manager.end(id)
 })
 
 test('Stop waits for committed tools, all results, and their backend continuation', async () => {
@@ -173,7 +281,7 @@ test('unknown tools and invalid arguments return honest errors without writing',
     expect(JSON.parse((event.item as { output: string }).output).ok).toBe(false)
   }
 
-  expect((await manager.status(id))?.error).toBe('Memory tool failed')
+  expect((await manager.status(id))?.error).toBe('Unknown tool failed')
   await manager.end(id)
 })
 
@@ -215,6 +323,22 @@ test('close deadline forces hangup and records unconfirmed usage', async () => {
   expect(socket.readyState).toBe(3)
 })
 
+test('a final database write finishing just after the close deadline does not fail end', async () => {
+  const { manager, sessions } = voiceFixture({ endTimeoutMs: 20 })
+  const originalUpdate = sessions.update.bind(sessions)
+  sessions.update = async (id, patch) => {
+    if (patch.endedAt) {
+      await Bun.sleep(40)
+    }
+
+    await originalUpdate(id, patch)
+  }
+  const { id } = await manager.create('offer')
+  await manager.end(id)
+  expect(sessions.rows.get(id)?.status).toBe('ended')
+  expect(sessions.rows.get(id)?.finalization).toBe('confirmed')
+})
+
 test('failed sideband setup closes the provider session and records local failure', async () => {
   const {
     provider,
@@ -234,6 +358,7 @@ test('failed sideband setup closes the provider session and records local failur
     provider,
     location,
     places,
+    new TestReservationService(),
     {
       openTimeoutMs: 10,
       endTimeoutMs: 20,
@@ -266,6 +391,7 @@ test('draining aborts creation and cleans up late provider completion', async ()
     provider,
     location,
     places,
+    new TestReservationService(),
   )
   const creation = manager.create('offer')
   const rejected = creation.then(
@@ -409,6 +535,7 @@ test('missing persistence service rejects runtime construction', () => {
         provider,
         location,
         places,
+        new TestReservationService(),
       ),
   ).toThrow('memory is required')
 })

@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { AuthService } from '@voice/auth'
 import { createApp } from './app.js'
-import { voiceFixture } from './testing/voice-fixture.js'
+import {
+  TestReservationService,
+  voiceFixture,
+} from './testing/voice-fixture.js'
 import type { VoiceSessionManager } from './voice/session-manager.js'
 
 class AppFixture {
@@ -19,6 +22,7 @@ class AppFixture {
   readonly app = createApp({
     voice: this.voice.manager,
     location: this.voice.location,
+    reservations: this.voice.reservations,
     auth: this.auth,
     resources: {
       ping: async () => ({
@@ -130,6 +134,7 @@ describe('phase 1 API', () => {
     const app = createApp({
       voice: voiceFixture().manager,
       location: voiceFixture().location,
+      reservations: new TestReservationService(),
       auth,
       resources: {
         ping: async () => ({ healthy: true, details: {} }),
@@ -182,6 +187,7 @@ test('missing voice runtime fails app construction rather than serving a partial
       auth,
       voice: undefined as unknown as VoiceSessionManager,
       location: voiceFixture().location,
+      reservations: new TestReservationService(),
       resources: {
         ping: async () => ({ healthy: true, details: {} }),
         close: async () => {},
@@ -199,6 +205,7 @@ test('location updates require authentication and valid coordinates', async () =
   const app = createApp({
     voice: voiceFixture().manager,
     auth,
+    reservations: new TestReservationService(),
     location: {
       latest: async () => null,
       save: async (position) => {
@@ -275,6 +282,7 @@ test('voice UI stream delivers a location request and the answer resolves its to
   const app = createApp({
     voice: fixture.manager,
     location: fixture.location,
+    reservations: fixture.reservations,
     auth,
     resources: {
       ping: async () => ({ healthy: true, details: {} }),

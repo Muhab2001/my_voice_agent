@@ -1,10 +1,12 @@
-import type {
-  LocationService,
-  MemoryService,
-  SessionUpdate,
-  Snapshot,
-  TranscriptService,
-  VoiceSessionService,
+import {
+  type LocationService,
+  type MemoryService,
+  ReservationError,
+  type ReservationService,
+  type SessionUpdate,
+  type Snapshot,
+  type TranscriptService,
+  type VoiceSessionService,
 } from '@voice/database'
 import {
   type EventOf,
@@ -15,8 +17,19 @@ import {
 } from './events.js'
 import type { PlacesService } from './places.js'
 import type { SidebandSocket, VoiceChatProvider } from './provider.js'
-import { executeLocationTool, executeMemoryTool } from './tools.js'
+import {
+  executeLocationTool,
+  executeMemoryTool,
+  executeReservationTool,
+  locationTools,
+  memoryTools,
+  reservationTools,
+} from './tools.js'
 import { UIEventChannel } from './ui-event-channel.js'
+
+const reservationToolNames = new Set(reservationTools.map((tool) => tool.name))
+const locationToolNames = new Set(locationTools.map((tool) => tool.name))
+const memoryToolNames = new Set(memoryTools.map((tool) => tool.name))
 
 /** A final-event waiter installed before sending commands that may resolve it synchronously. */
 class Deferred<T> {
@@ -68,6 +81,7 @@ type ResponseWork = {
 
 type ActiveSession = {
   id: string
+  reservationId?: string
   providerSessionId: string
   socket: SidebandSocket
   opened: Deferred<boolean>
@@ -112,6 +126,7 @@ export class VoiceSessionManager {
     private readonly voice: VoiceChatProvider,
     private readonly location: LocationService,
     private readonly places: PlacesService,
+    private readonly reservations: ReservationService,
     private options: VoiceSessionManagerOptions = {},
   ) {
     const dependencies = {
@@ -121,6 +136,7 @@ export class VoiceSessionManager {
       voice,
       location,
       places,
+      reservations,
     }
 
     for (const [name, service] of Object.entries(dependencies)) {
@@ -510,11 +526,34 @@ export class VoiceSessionManager {
 
     if (!call) {
       let execution: Promise<object>
+      const isReservationTool = reservationToolNames.has(item.name)
+      const isLocationTool = locationToolNames.has(item.name)
+      const isMemoryTool = memoryToolNames.has(item.name)
 
-      if (
-        item.name === 'get_user_location' ||
-        item.name === 'find_nearby_places'
-      ) {
+      if (isReservationTool) {
+        execution = executeReservationTool(
+          this.reservations,
+          this.uiEventChannel,
+          session.id,
+          item.name,
+          item.arguments,
+        ).then((result) => {
+          if ('reservation' in result) {
+            const reservation = result.reservation
+
+            if (
+              reservation &&
+              typeof reservation === 'object' &&
+              'id' in reservation &&
+              typeof reservation.id === 'string'
+            ) {
+              session.reservationId = reservation.id
+            }
+          }
+
+          return result
+        })
+      } else if (isLocationTool) {
         execution = executeLocationTool(
           this.location,
           this.places,
@@ -523,25 +562,41 @@ export class VoiceSessionManager {
           item.name,
           item.arguments,
         )
-      } else {
+      } else if (isMemoryTool) {
         execution = executeMemoryTool(
           this.memory,
           session.id,
           item.name,
           item.arguments,
         )
+      } else {
+        execution = Promise.reject(new Error('Unknown tool'))
       }
 
       call = {
         signature,
         result: execution
           .then((result) => JSON.stringify({ ok: true, ...result }))
-          .catch(() => {
-            session.failure ??=
-              item.name === 'find_nearby_places' ||
-              item.name === 'get_user_location'
+          .catch((error: unknown) => {
+            if (isReservationTool && error instanceof ReservationError) {
+              return JSON.stringify({
+                ok: false,
+                code: error.code,
+                error: error.message,
+              })
+            }
+
+            console.error('Tool execution failed', {
+              tool: item.name,
+              cause: error instanceof Error ? error.message : String(error),
+            })
+            session.failure ??= isReservationTool
+              ? 'Reservation tool failed'
+              : isLocationTool
                 ? 'Places tool failed'
-                : 'Memory tool failed'
+                : isMemoryTool
+                  ? 'Memory tool failed'
+                  : 'Unknown tool failed'
             return JSON.stringify({
               ok: false,
               error:
@@ -738,6 +793,25 @@ export class VoiceSessionManager {
       session.socket.close()
 
       try {
+        if (session.reservationId) {
+          const draft = await this.reservations.get(session.reservationId)
+
+          if (draft?.status === 'draft') {
+            await this.reservations.abandon(draft.id, draft.revision)
+          }
+        }
+      } catch (error) {
+        if (
+          !(
+            error instanceof ReservationError &&
+            (error.code === 'conflict' || error.code === 'invalid')
+          )
+        ) {
+          session.failure ??= 'Reservation finalization failed'
+        }
+      }
+
+      try {
         await timeout(
           Promise.all([hangup, this.flush(session)]),
           deadline -
@@ -753,18 +827,15 @@ export class VoiceSessionManager {
       }
 
       try {
-        await timeout(
-          this.sessions.update(session.id, {
-            status: session.failure ? 'failed' : 'ended',
-            endedAt: new Date(),
-            endReason: session.failure ? 'error' : 'close_requested',
-            finalization: 'incomplete',
-            usage: session.usage,
-            ...session.final,
-            error: session.failure ?? null,
-          }),
-          deadline - Date.now(),
-        )
+        await this.sessions.update(session.id, {
+          status: session.failure ? 'failed' : 'ended',
+          endedAt: new Date(),
+          endReason: session.failure ? 'error' : 'close_requested',
+          finalization: 'incomplete',
+          usage: session.usage,
+          ...session.final,
+          error: session.failure ?? null,
+        })
       } finally {
         this.uiEventChannel.closeSession(session.id)
         this.active.delete(session.id)

@@ -36,7 +36,7 @@ export function startApiServer(
     state.shuttingDown = true
 
     const shutdownDeadline = Date.now() + 12_000
-    // One hard deadline includes resource cleanup, even if a database or Redis operation stalls.
+    // One hard deadline includes resource cleanup, even if a database operation stalls.
     const hardTimeout = setTimeout(
       () => {
         console.error(

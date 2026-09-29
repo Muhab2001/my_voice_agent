@@ -1,8 +1,4 @@
-import {
-  voiceAnswerSchema,
-  voiceStatusSchema,
-  voiceUiEventSchema,
-} from '@voice/contracts'
+import { voiceAnswerSchema, voiceStatusSchema } from '@voice/contracts'
 import { ApiClient } from '../lib/api-client'
 import { liveVoiceEventSchema } from './live-voice-events.js'
 import type { VoiceTransport, VoiceTransportEvents } from './types'
@@ -13,8 +9,7 @@ const emptyResponse = { parse: () => undefined }
  * Owns one browser voice session: microphone capture, WebRTC media, captions and cleanup.
  * SDP negotiation and authenticated lifecycle/status requests go through our API;
  * microphone and assistant audio travel directly over WebRTC to/from the provider.
- * Data-channel events update the UI. Private tools and transcript persistence run on
- * the server sideband. Create a fresh transport instance for every Start after Stop.
+ * Private tools and transcript persistence run on the server sideband.
  */
 export class LiveVoiceTransport implements VoiceTransport {
   private peer: RTCPeerConnection | null = null
@@ -30,8 +25,7 @@ export class LiveVoiceTransport implements VoiceTransport {
   private muted = false
   private ending: Promise<void> | null = null
   private polling: number | null = null
-  private uiController: AbortController | null = null
-  private uiReader: ReadableStreamDefaultReader<Uint8Array> | null = null
+  private pollFailures = 0
   private connectTimer: number | null = null
   private disconnectTimer: number | null = null
   private captions = { user: '', assistant: '' }
@@ -45,12 +39,8 @@ export class LiveVoiceTransport implements VoiceTransport {
     this.audio.addEventListener('pause', () => this.events.onAudioEnded())
   }
 
-  /**
-   * Request microphone permission, install media/data-channel listeners, gather ICE,
-   * and exchange the SDP offer for our API's answer. Connected status waits for
-   * session.started. If Stop races setup, release late tracks and end any late session.
-   */
-  async start() {
+  /** Request microphone permission, negotiate SDP through the API, then connect WebRTC. */
+  async start(): Promise<string> {
     this.events.onStatus('connecting')
 
     try {
@@ -68,7 +58,7 @@ export class LiveVoiceTransport implements VoiceTransport {
         stream.getTracks().forEach((track) => {
           track.stop()
         })
-        return
+        return ''
       }
 
       this.stream = stream
@@ -140,7 +130,7 @@ export class LiveVoiceTransport implements VoiceTransport {
       await this.gatherIce(peer)
 
       if (this.stopped) {
-        return
+        return ''
       }
 
       const result = await ApiClient.post(
@@ -152,26 +142,22 @@ export class LiveVoiceTransport implements VoiceTransport {
 
       if (this.stopped) {
         await this.endRemote()
-        return
+        return result.id
       }
 
       this.connectTimer = window.setTimeout(
         () => this.fail('Voice session did not connect. Please try again.'),
         15_000,
       )
-      await this.openUiEvents(result.id)
-
-      if (this.stopped) {
-        return
-      }
-
       await peer.setRemoteDescription({ type: 'answer', sdp: result.sdp })
       this.polling = window.setInterval(() => {
         void this.pollStatus()
       }, 2000)
+
+      return result.id
     } catch (error) {
       if (this.stopped) {
-        return
+        return ''
       }
 
       const message =
@@ -182,92 +168,6 @@ export class LiveVoiceTransport implements VoiceTransport {
             : 'Could not start the voice session.'
       this.fail(message)
       throw error
-    }
-  }
-
-  /** Receive app UI events on one authenticated stream; tool results remain on the private sideband. */
-  private async openUiEvents(id: string) {
-    const controller = new AbortController()
-    this.uiController = controller
-
-    try {
-      const response = await ApiClient.stream(
-        `/v1/voice/sessions/${id}/ui-events`,
-        controller.signal,
-      )
-
-      if (response.body) {
-        void this.readUiEvents(response.body, id, controller.signal)
-      }
-    } catch {
-      if (!this.stopped) {
-        this.events.onError(
-          'Place and location events could not connect. Try restarting the voice session.',
-        )
-      }
-    }
-  }
-
-  private async readUiEvents(
-    body: ReadableStream<Uint8Array>,
-    id: string,
-    signal: AbortSignal,
-  ) {
-    const reader = body.getReader()
-    this.uiReader = reader
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let ended = false
-
-    try {
-      while (!signal.aborted) {
-        const chunk = await reader.read()
-
-        if (chunk.done) {
-          ended = true
-          break
-        }
-
-        buffer += decoder.decode(chunk.value, { stream: true })
-        let boundary = buffer.indexOf('\n\n')
-
-        while (boundary !== -1) {
-          const frame = buffer.slice(0, boundary)
-          buffer = buffer.slice(boundary + 2)
-          const data = frame
-            .split('\n')
-            .filter((line) => line.startsWith('data: '))
-            .map((line) => line.slice(6))
-            .join('\n')
-
-          if (data) {
-            const event = voiceUiEventSchema.safeParse(JSON.parse(data))
-
-            if (event.success && event.data.type === 'location-request') {
-              this.events.onLocationRequest?.(id, event.data.requestId)
-            } else if (event.success && event.data.type === 'place-card') {
-              this.events.onPlaceCard?.(event.data.card)
-            }
-          }
-
-          boundary = buffer.indexOf('\n\n')
-        }
-      }
-    } catch {
-      if (ended && !signal.aborted && !this.stopped) {
-        this.events.onError(
-          'Place and location updates were interrupted. Restart the voice session.',
-        )
-      }
-    } finally {
-      this.uiReader = null
-      reader.releaseLock()
-
-      if (!signal.aborted && !this.stopped) {
-        this.events.onError(
-          'Place and location updates ended. Restart the voice session.',
-        )
-      }
     }
   }
 
@@ -353,10 +253,7 @@ export class LiveVoiceTransport implements VoiceTransport {
     }
   }
 
-  /**
-   * Poll our API every two seconds because private sideband/tool failures may not
-   * appear on the browser data channel. Report errors and stop ended/failed sessions.
-   */
+  /** Poll because private sideband and tool failures may not reach the browser channel. */
   private async pollStatus() {
     if (!this.id || this.stopped) {
       return
@@ -373,6 +270,8 @@ export class LiveVoiceTransport implements VoiceTransport {
         return
       }
 
+      this.pollFailures = 0
+
       if (status.error) {
         this.events.onError(status.error)
       }
@@ -383,7 +282,7 @@ export class LiveVoiceTransport implements VoiceTransport {
         void this.stop()
       }
     } catch {
-      if (!this.stopped) {
+      if (!this.stopped && ++this.pollFailures >= 3) {
         this.fail('Could not reach the voice server.')
       }
     }
@@ -396,14 +295,14 @@ export class LiveVoiceTransport implements VoiceTransport {
     void this.stop()
   }
 
-  /**
-   * Immediately mute capture/playback and cancel UI timers, then ask the server to
-   * drain tools and final events. Keep the peer/channel alive until that request
-   * settles; repeated Stop calls share the same promise and release resources once.
-   */
+  /** Ask the API to drain tools and final events before releasing WebRTC media. */
   stop(): Promise<void> {
     if (this.ending) {
       return this.ending
+    }
+
+    if (this.stopped) {
+      return Promise.resolve()
     }
 
     this.stopped = true
@@ -414,9 +313,6 @@ export class LiveVoiceTransport implements VoiceTransport {
     if (this.polling !== null) {
       window.clearInterval(this.polling)
     }
-
-    this.uiController?.abort()
-    void this.uiReader?.cancel()
 
     if (this.connectTimer !== null) {
       window.clearTimeout(this.connectTimer)
@@ -433,11 +329,7 @@ export class LiveVoiceTransport implements VoiceTransport {
     return this.ending
   }
 
-  /**
-   * End the local session through our authenticated API and check saved finalization.
-   * Bound the wait to 12 seconds and surface incomplete closure. Never send
-   * session.close directly: the server must submit pending tool results first.
-   */
+  /** End the local session through the API and check saved finalization. */
   private async endRemote() {
     const id = this.id
 
@@ -446,7 +338,6 @@ export class LiveVoiceTransport implements VoiceTransport {
     }
 
     this.id = null
-    // Keep WebRTC and its data channel open while the server drains tools and final events.
     let timeout: number | undefined
 
     try {
@@ -477,7 +368,9 @@ export class LiveVoiceTransport implements VoiceTransport {
         }),
       ])
     } catch {
-      this.events.onError('Session finalization could not be confirmed.')
+      if (!this.failed) {
+        this.events.onError('Session finalization could not be confirmed.')
+      }
     } finally {
       window.clearTimeout(timeout)
     }

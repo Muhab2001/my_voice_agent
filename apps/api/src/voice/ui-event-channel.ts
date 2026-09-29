@@ -21,6 +21,7 @@ type Pending = {
 export class UIEventChannel {
   private listeners = new Map<string, Set<Subscriber>>()
   private pending = new Map<string, Pending>()
+  private latest = new Map<string, UiEvent[]>()
 
   subscribe(
     sessionId: string,
@@ -32,6 +33,10 @@ export class UIEventChannel {
     listeners.add(subscriber)
     this.listeners.set(sessionId, listeners)
     const pending = this.pending.get(sessionId)
+
+    for (const event of this.latest.get(sessionId) ?? []) {
+      send(event)
+    }
 
     if (pending) {
       send({ type: 'location-request', requestId: pending.requestId })
@@ -47,6 +52,14 @@ export class UIEventChannel {
   }
 
   emit(sessionId: string, event: UiEvent): void {
+    if (event.type !== 'location-request') {
+      const previous = this.latest.get(sessionId) ?? []
+      this.latest.set(sessionId, [
+        ...previous.filter((item) => item.type !== event.type),
+        event,
+      ])
+    }
+
     for (const subscriber of this.listeners.get(sessionId) ?? []) {
       subscriber.send(event)
     }
@@ -98,6 +111,7 @@ export class UIEventChannel {
 
     const listeners = this.listeners.get(sessionId)
     this.listeners.delete(sessionId)
+    this.latest.delete(sessionId)
 
     for (const subscriber of listeners ?? []) {
       subscriber.close()

@@ -65,6 +65,7 @@ export function newDrizzleDatabase({
 
 export * from './location-service.js'
 export * from './memory-service.js'
+export * from './reservation-service.js'
 export { DEFAULT_LIVE_MODEL } from './schema.js'
 export * from './transcript-service.js'
 export * from './voice-session-service.js'

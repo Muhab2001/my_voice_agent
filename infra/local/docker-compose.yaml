@@ -15,18 +15,6 @@ services:
       timeout: 3s
       retries: 15
     networks: [internal]
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 3s
-      timeout: 3s
-      retries: 15
-    networks: [internal]
   migrate:
     build:
       context: ../..
@@ -36,7 +24,6 @@ services:
     env_file: ../../.env
     environment:
       DATABASE_URL: postgres://voice:voice@postgres:5432/voice
-      REDIS_URL: redis://redis:6379
     working_dir: /app/apps/scripts
     command: ["bun", "src/migrate.ts"]
     depends_on:
@@ -52,7 +39,6 @@ services:
     env_file: ../../.env
     environment:
       DATABASE_URL: postgres://voice:voice@postgres:5432/voice
-      REDIS_URL: redis://redis:6379
       PORT: "3000"
       OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
     working_dir: /app/apps/api
@@ -62,8 +48,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
     stop_grace_period: 15s
     networks: [internal]
   web:
@@ -88,4 +72,3 @@ networks:
   internal: {}
 volumes:
   postgres_data:
-  redis_data:

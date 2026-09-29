@@ -105,4 +105,97 @@ export const voiceUiEventSchema = z.discriminatedUnion('type', [
     requestId: z.string().uuid(),
   }),
   z.object({ type: z.literal('place-card'), card: placeCardSchema }),
+  z.object({
+    type: z.literal('reservation-state'),
+    reservation: z.lazy(() => reservationStateSchema),
+  }),
+  z.object({
+    type: z.literal('reservation-options'),
+    kind: z.enum(['hotels', 'rooms', 'dates', 'reservations']),
+    options: z.lazy(() =>
+      z.union([
+        z.array(hotelOptionSchema),
+        z.array(offeringOptionSchema),
+        z.array(dateOptionSchema),
+        z.array(reservationStateSchema),
+        z.object({ message: z.string() }),
+      ]),
+    ),
+  }),
 ])
+
+export const reservationRoomInputSchema = z
+  .object({
+    offeringId: z.string().uuid(),
+    quantity: z.number().int().min(1).max(100),
+  })
+  .strict()
+export const reservationPatchSchema = z
+  .object({
+    revision: z.number().int().positive(),
+    hotelId: z.string().uuid().nullable().optional(),
+    stayDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .nullable()
+      .optional(),
+    guestName: z.string().trim().min(1).max(128).nullable().optional(),
+    rooms: z.array(reservationRoomInputSchema).max(20).optional(),
+  })
+  .strict()
+export const reservationCreateSchema = reservationPatchSchema.omit({
+  revision: true,
+})
+export const reservationActionSchema = z
+  .object({ revision: z.number().int().positive() })
+  .strict()
+export const reservationFilterSchema = z.object({
+  upcoming: z.enum(['true', 'false']).optional(),
+  city: z.string().trim().min(1).max(128).optional(),
+  brand: z.string().trim().min(1).max(128).optional(),
+  status: z.enum(['draft', 'abandoned', 'confirmed']).optional(),
+})
+export const reservationStateSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(['draft', 'abandoned', 'confirmed']),
+  hotelId: z.string().uuid().nullable(),
+  hotel: z.string().nullable(),
+  city: z.string().nullable(),
+  brand: z.string().nullable(),
+  stayDate: z.string().nullable(),
+  guestName: z.string().nullable(),
+  rooms: z.array(
+    z.object({
+      offeringId: z.string().uuid(),
+      name: z.string(),
+      quantity: z.number(),
+      unitPriceSar: z.number(),
+      lineTotalSar: z.number(),
+    }),
+  ),
+  quotedTotalSar: z.number().nullable(),
+  confirmedTotalSar: z.number().nullable(),
+  nextMissingField: z
+    .enum(['hotel', 'stayDate', 'rooms', 'guestName'])
+    .nullable(),
+  reason: z.string().nullable(),
+  revision: z.number(),
+  updatedAt: z.string(),
+})
+export const hotelOptionSchema = z.object({
+  id: z.string().uuid(),
+  brandName: z.string(),
+  locationName: z.string(),
+  city: z.string(),
+})
+export const offeringOptionSchema = z.object({
+  id: z.string().uuid(),
+  hotelId: z.string().uuid(),
+  name: z.string(),
+  priceSar: z.number(),
+  available: z.number(),
+})
+export const dateOptionSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  availableRooms: z.number().int().nonnegative(),
+})

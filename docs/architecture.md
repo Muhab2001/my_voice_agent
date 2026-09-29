@@ -2,11 +2,48 @@
 
 ## Runtime
 
-The Bun workspace contains a React/Vite frontend, a Hono API, shared contracts and authentication, PostgreSQL through Drizzle, Redis for existing readiness/resource management, and a one-shot migration app. Authentication uses a shared password and stateless access/refresh JWTs. Memory is shared across this installation.
+The Bun workspace contains a React/Vite frontend, a Hono API, shared contracts and authentication, PostgreSQL through Drizzle, and a one-shot migration app. Authentication uses a shared password and stateless access/refresh JWTs. Memory is shared across this installation.
+
+```mermaid
+flowchart LR
+  subgraph Browser
+    Page[VoicePage]
+    Transport[LiveVoiceTransport]
+    UiStream[VoiceUiEventStream]
+    Cards[Location and reservation cards]
+    Page -->|start voice| Transport
+    Transport -->|return local session ID| Page
+    Page -->|start with session ID| UiStream
+    UiStream -->|validated UI events| Cards
+  end
+
+  subgraph API
+    Hono[Hono HTTP routes]
+    Manager[VoiceSessionManager]
+    Channel[UIEventChannel]
+    Services[Memory, location, reservation services]
+    Hono --> Manager
+    Manager --> Services
+    Manager --> Channel
+    Channel --> Hono
+  end
+
+  subgraph OpenAI
+    Live[GPT Live session]
+    Responses[Delegated Responses model]
+    Live --> Responses
+  end
+
+  Services --> Postgres[(PostgreSQL)]
+  Transport <-->|HTTP POST SDP offer, answer and session ID; status and end| Hono
+  Transport <-->|WebRTC audio and public caption data channel| Live
+  Manager <-->|WebSocket sideband: private events and tool results| Live
+  Hono -->|HTTP SSE GET ui-events| UiStream
+```
 
 The browser sends an authenticated JSON SDP offer to `POST /v1/voice/sessions`. The API creates a local `voice_sessions` record, calls `client.live.create`, saves the provider session ID, and opens an authenticated sideband at `wss://api.openai.com/v1/live/sessions/{session_id}/attach`. It registers listeners immediately and waits for socket open before returning `{id, sdp}`. An attached session is already started; the API never sends `session.start`.
 
-Microphone and assistant audio travel directly between the browser and OpenAI through WebRTC. The browser’s data channel receives only captions, usage, lifecycle events, and errors. It cannot submit model changes or tool results, and cannot receive private Responses events. The API key, prompts, backend configuration and tool execution remain on the API server. The browser polls the authenticated session-status endpoint to expose sideband and memory errors.
+Microphone and assistant audio travel directly between the browser and OpenAI through WebRTC. The browser’s data channel receives only captions, usage, lifecycle events, and errors. It cannot submit model changes or tool results, and cannot receive private Responses events. The API key, prompts, backend configuration and tool execution remain on the API server. `LiveVoiceTransport.start()` returns the local session ID; `VoicePage` passes it to `VoiceUiEventStream`, which receives validated location and reservation updates through authenticated HTTP SSE. The UI stream can fail without ending WebRTC audio. The browser separately polls the authenticated session-status endpoint to expose sideband and memory errors.
 
 The voice model is `gpt-live-1`; the Responses backend is `gpt-6-luna`. These are server-owned constants. The Live prompt controls conversational style, interruptions, and when to delegate. The backend prompt controls memory use and truthful tool-result reporting. See the official [WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc), [server controls](https://developers.openai.com/api/docs/guides/voice-server-controls), and [delegation](https://developers.openai.com/api/docs/guides/live-delegation) documentation.
 
@@ -30,12 +67,12 @@ The session manager is constructed once in `main.ts` and is a required dependenc
 
 Stop disables browser audio input/output while retaining the WebRTC transport. The authenticated end endpoint is idempotent. The server drains existing tool results and Responses continuations, sends `session.close` with its final-event listener already registered, and waits for `session.closed` or the deadline. It saves final usage/reason, flushes transcripts and releases the sideband. Missing final events are recorded as incomplete; provider hangup is attempted before resources are released. The browser then releases microphone, audio and its peer connection. See [graceful close](https://developers.openai.com/api/docs/guides/live-conversations).
 
-SIGTERM/SIGINT mark the process draining, reject new sessions, abort session creation and drain active sessions concurrently before closing PostgreSQL/Redis. Late creation completions are cleaned up. The overall shutdown budget is 12 seconds, leaving margin inside the deployment’s 15-second allowance. One API process owns its sidebands; horizontal session ownership requires a separate design.
+SIGTERM/SIGINT mark the process draining, reject new sessions, abort session creation and drain active sessions concurrently before closing PostgreSQL. Late creation completions are cleaned up. The overall shutdown budget is 12 seconds, leaving margin inside the deployment’s 15-second allowance. One API process owns its sidebands; horizontal session ownership requires a separate design.
 
 ## HTTP and deployment
 
 Every voice route requires a verified access JWT and enforces the allowed browser origin. Login, refresh, logout, health, and generated OpenAPI remain as implemented in phase 1. Shared contracts define voice offers, answers, status and transcript responses. Errors contain a code, message and request ID. Avoid logging passwords, JWTs, SDP, raw audio, or full tool arguments.
 
-Compose forwards `OPENAI_API_KEY` only to the API. Public frontend configuration contains an optional API origin. Render can host the API and PostgreSQL while Vercel hosts the static frontend; production deployment is covered by plan 03. Redis remains an existing required runtime resource.
+Compose forwards `OPENAI_API_KEY` only to the API. Public frontend configuration contains an optional API origin. Render can host the API and PostgreSQL while Vercel hosts the static frontend; production deployment is covered by plan 03.
 
 Audio recordings, user accounts, tenant isolation, vector search, memory-management screens, and horizontal sideband ownership remain outside this phase.

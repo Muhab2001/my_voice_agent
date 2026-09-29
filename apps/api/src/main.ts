@@ -1,8 +1,8 @@
 import { AuthService } from '@voice/auth'
-import { NewRedisCache } from '@voice/cache'
 import {
   DrizzleLocationService,
   DrizzleMemoryService,
+  DrizzleReservationService,
   DrizzleTranscriptService,
   DrizzleVoiceSessionService,
   newDrizzleDatabase,
@@ -25,16 +25,8 @@ const database = newDrizzleDatabase({
   queryTimeoutMs: env.DATABASE_QUERY_TIMEOUT_MS,
   maxLifetimeSeconds: env.DATABASE_MAX_LIFETIME_SECONDS,
 })
-const redis = NewRedisCache({
-  url: env.REDIS_URL,
-  connectTimeoutMs: env.REDIS_CONNECT_TIMEOUT_MS,
-  pingTimeoutMs: env.REDIS_PING_TIMEOUT_MS,
-  disableOfflineQueue: env.REDIS_DISABLE_OFFLINE_QUEUE === 'true',
-  reconnectDelayMs: env.REDIS_RECONNECT_DELAY_MS,
-})
 const resources = new ResourceManager({
   database: database.resource,
-  redis: redis.resource,
 })
 
 const startupReport = await resources.ping()
@@ -57,6 +49,7 @@ try {
 
   const state: ServerState = { shuttingDown: false }
   const location = new DrizzleLocationService(database.client)
+  const reservations = new DrizzleReservationService(database.client)
   const voice = new VoiceSessionManager(
     new DrizzleVoiceSessionService(database.client),
     new DrizzleMemoryService(database.client),
@@ -64,10 +57,12 @@ try {
     new GPTLiveVoiceChatProvider(env.OPENAI_API_KEY),
     location,
     new GooglePlacesService(env.GOOGLE_MAPS_API_KEY),
+    reservations,
   )
   const app = createApp({
     voice,
     location,
+    reservations,
     auth,
     resources,
     allowedOrigin: env.ALLOWED_ORIGIN,
