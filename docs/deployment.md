@@ -32,10 +32,11 @@ The Docker start command runs `bun run migrate` before the API starts. This
 also applies future database migrations on restart or deploy. A failed
 migration stops the API instead of serving incompatible code.
 
-The Blueprint uses free Render plans for a demo. Free PostgreSQL expires
-after 30 days, and free Key Value does not persist across restarts. Upgrade
-the PostgreSQL plan before expiry if reservation data must be retained; review
-Render's current pricing before selecting a paid plan.
+The Blueprint uses free Render plans for the API and PostgreSQL, and the
+smallest paid Key Value plan (`256mb`, currently $10/month). Free PostgreSQL
+expires after 30 days; upgrade its plan before expiry if reservation data must
+be retained. Upgrading an existing free Key Value instance restarts it and
+discards its current contents.
 
 ## 3. Create the Vercel project
 

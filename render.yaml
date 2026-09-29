@@ -32,7 +32,7 @@ services:
 
   - type: keyvalue
     name: sarjy-redis
-    plan: free
+    plan: 256mb
     region: frankfurt
     ipAllowList: []
 
