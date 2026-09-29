@@ -5,3 +5,4 @@ dist/
 *.tsbuildinfo
 .bun-cache/
 .tmp/
+.vercel/

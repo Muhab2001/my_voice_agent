@@ -1,4 +1,5 @@
 {
+  "globalPassThroughEnv": ["RENDER_API_ORIGIN"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

@@ -5,4 +5,5 @@ dist
 .turbo
 .bun-cache
 .tmp
+.vercel
 out

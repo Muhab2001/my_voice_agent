@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: sarjy-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./infra/render/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/ready
+    maxShutdownDelaySeconds: 15
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sarjy-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: sarjy-redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: JWT_SIGNING_SECRET
+        generateValue: true
+      - key: ALLOWED_ORIGIN
+        sync: false
+      - key: COOKIE_SECURE
+        value: 'true'
+
+  - type: keyvalue
+    name: sarjy-redis
+    plan: free
+    region: frankfurt
+    ipAllowList: []
+
+databases:
+  - name: sarjy-postgres
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: '16'
+    ipAllowList: []
