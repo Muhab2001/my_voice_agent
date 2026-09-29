@@ -70,7 +70,7 @@ export const memoryTools: FunctionTool[] = [
 
   tool(
     'remember_fact',
-    'Save one durable fact or preference explicitly stated by the user. Search first to avoid duplicate facts. Use null for unknown metadata.',
+    'Save one useful fact or preference stated by the user, even without a request to remember it. Search first to avoid duplicate facts. Use null for unknown metadata.',
     factProperties,
   ),
 
