@@ -7,7 +7,6 @@ services:
     dockerfilePath: ./infra/render/Dockerfile
     dockerContext: .
     healthCheckPath: /health/ready
-    maxShutdownDelaySeconds: 15
     envVars:
       - key: DATABASE_URL
         fromDatabase:
