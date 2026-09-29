@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LiveVoiceTransport } from '../transports/live-voice-transport'
 import type {
+  PlaceCard,
   TranscriptItem,
   VoiceStatus,
   VoiceTransport,
@@ -12,6 +13,7 @@ const createLiveTransport: VoiceTransportFactory = (events) =>
 
 export function useVoiceSession(
   createTransport: VoiceTransportFactory = createLiveTransport,
+  onLocationRequest?: (sessionId: string, requestId: string) => void,
 ) {
   const transport = useRef<VoiceTransport | null>(null)
   const [status, setStatus] = useState<VoiceStatus>('idle')
@@ -21,6 +23,8 @@ export function useVoiceSession(
   const [inputLevel, setInputLevel] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [transcript, setTranscript] = useState<TranscriptItem[]>([])
+  const [placeCard, setPlaceCard] = useState<PlaceCard | null>(null)
+
   const stop = useCallback(async () => {
     const current = transport.current
     if (!current) {
@@ -52,6 +56,7 @@ export function useVoiceSession(
     }
     setError(null)
     setTranscript([])
+    setPlaceCard(null)
     setAudioReady(false)
     const next = createTransport({
       onStatus: (value) => {
@@ -97,6 +102,16 @@ export function useVoiceSession(
         setError(message)
         setAudioPlaying(next.isPlaying())
       },
+      onPlaceCard: (card) => {
+        if (transport.current === next) {
+          setPlaceCard(card)
+        }
+      },
+      onLocationRequest: (sessionId, requestId) => {
+        if (transport.current === next) {
+          onLocationRequest?.(sessionId, requestId)
+        }
+      },
     })
     transport.current = next
     try {
@@ -104,7 +119,7 @@ export function useVoiceSession(
     } catch {
       await next.stop()
     }
-  }, [createTransport])
+  }, [createTransport, onLocationRequest])
 
   const toggleMute = useCallback(() => {
     setMuted((value) => {
@@ -135,6 +150,8 @@ export function useVoiceSession(
     inputLevel,
     error,
     transcript,
+    placeCard,
+    dismissPlaceCard: () => setPlaceCard(null),
     start,
     stop,
     toggleMute,

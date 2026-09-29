@@ -1,4 +1,5 @@
 import {
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -93,6 +94,20 @@ export const memories = pgTable(
     uniqueIndex('memories_fingerprint_unique').on(table.fingerprint),
     index('memories_entity_event_idx').on(table.entity, table.eventAt),
   ],
+)
+
+export const userLocation = pgTable(
+  'user_location',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    latitude: doublePrecision('latitude').notNull(),
+    longitude: doublePrecision('longitude').notNull(),
+    accuracyMeters: doublePrecision('accuracy_meters').notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index('user_location_recorded_at_idx').on(table.recordedAt)],
 )
 
 /** Read-only speaker passages assembled from persisted snapshots by the migration-defined view. */

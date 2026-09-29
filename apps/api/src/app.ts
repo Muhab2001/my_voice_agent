@@ -1,6 +1,7 @@
 import { swaggerUI } from '@hono/swagger-ui'
 import { OpenAPIHono } from '@hono/zod-openapi'
 import type { AuthService } from '@voice/auth'
+import type { LocationService } from '@voice/database'
 import type { RemoteResource } from '@voice/resource-manager'
 import { cors } from 'hono/cors'
 import { AllowedOrigin, Authenticated, requestId } from './http/middleware.js'
@@ -25,6 +26,12 @@ import {
   readyRoute,
 } from './routes/health.js'
 import {
+  locationToolReplyHandler,
+  locationToolReplyRoute,
+  saveLocationHandler,
+  saveLocationRoute,
+} from './routes/location.js'
+import {
   createVoiceHandler,
   createVoiceRoute,
   endVoiceHandler,
@@ -34,10 +41,12 @@ import {
   voiceStatusHandler,
   voiceStatusRoute,
 } from './routes/voice.js'
+import { voiceUiEventsHandler } from './routes/voice-ui-events.js'
 import type { VoiceSessionManager } from './voice/session-manager.js'
 
 export type ApiDependencies = {
   voice: VoiceSessionManager
+  location: LocationService
   auth: AuthService
   resources: RemoteResource<Record<string, string>>
   allowedOrigin: string
@@ -48,6 +57,7 @@ export type ApiDependencies = {
 export function createApp({
   auth,
   voice,
+  location,
   resources,
   allowedOrigin,
   cookieSecure,
@@ -72,6 +82,8 @@ export function createApp({
   app.use('/v1/auth/*', AllowedOrigin(allowedOrigin))
   app.use('/v1/voice/*', AllowedOrigin(allowedOrigin))
   app.use('/v1/voice/*', Authenticated(auth))
+  app.use('/v1/location', AllowedOrigin(allowedOrigin))
+  app.use('/v1/location', Authenticated(auth))
   app.onError(errorHandler)
   app.notFound(notFoundHandler)
 
@@ -85,6 +97,10 @@ export function createApp({
   app.openapi(endVoiceRoute, endVoiceHandler(voice))
   app.openapi(voiceStatusRoute, voiceStatusHandler(voice))
   app.openapi(transcriptsRoute, transcriptsHandler(voice))
+
+  app.openapi(saveLocationRoute, saveLocationHandler(location))
+  app.openapi(locationToolReplyRoute, locationToolReplyHandler(voice, location))
+  app.get('/v1/voice/sessions/:id/ui-events', voiceUiEventsHandler(voice))
 
   app.doc('/openapi.json', {
     openapi: '3.0.0',

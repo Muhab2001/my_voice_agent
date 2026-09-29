@@ -1,13 +1,17 @@
 import type {
+  Coordinates,
+  LocationService,
   Memory,
   MemoryInput,
   MemoryQuery,
   MemoryService,
+  SavedLocation,
   SessionUpdate,
   Snapshot,
   TranscriptService,
   VoiceSessionService,
 } from '@voice/database'
+import type { PlacesService } from '../voice/places.js'
 import type { SidebandSocket, VoiceChatProvider } from '../voice/provider.js'
 import {
   VoiceSessionManager,
@@ -181,17 +185,40 @@ export class TestVoiceChatProvider implements VoiceChatProvider {
   }
 }
 
+export class TestLocationService implements LocationService {
+  position: SavedLocation | null = null
+
+  async save(input: Coordinates) {
+    this.position = { ...input, recordedAt: new Date() }
+    return this.position
+  }
+
+  async latest() {
+    return this.position
+  }
+}
+
+export class TestPlacesService implements PlacesService {
+  async nearby() {
+    return []
+  }
+}
+
 export function voiceFixture(options: VoiceSessionManagerOptions = {}) {
   const sessions = new TestVoiceSessionService()
   const memory = new TestMemoryService()
   const transcripts = new TestTranscriptService()
   const socket = new TestSocket()
   const provider = new TestVoiceChatProvider(socket)
+  const location = new TestLocationService()
+  const places = new TestPlacesService()
   const manager = new VoiceSessionManager(
     sessions,
     memory,
     transcripts,
     provider,
+    location,
+    places,
     {
       endTimeoutMs: 200,
       ...options,
@@ -203,6 +230,8 @@ export function voiceFixture(options: VoiceSessionManagerOptions = {}) {
     transcripts,
     socket,
     provider,
+    location,
+    places,
     manager,
     hangups: provider.hangups,
   }

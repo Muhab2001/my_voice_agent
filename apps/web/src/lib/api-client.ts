@@ -115,6 +115,35 @@ export class ApiClient {
     )
   }
 
+  static async stream(
+    path: `/${string}`,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    if (
+      !ApiClient.accessToken ||
+      ApiClient.accessTokenExpiresAt - Date.now() <= AUTH_REFRESH_BUFFER_MS
+    ) {
+      await ApiClient.refresh()
+    }
+
+    const send = () =>
+      fetchApi({
+        path,
+        method: 'GET',
+        accessToken: ApiClient.accessToken,
+        signal,
+      })
+    let response = await send()
+
+    if (response.status === 401) {
+      await ApiClient.refresh()
+      response = await send()
+    }
+
+    await assertOk(response)
+    return response
+  }
+
   static clearAccessToken(): void {
     ApiClient.accessToken = null
     ApiClient.accessTokenExpiresAt = 0

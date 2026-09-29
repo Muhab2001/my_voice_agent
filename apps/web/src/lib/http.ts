@@ -8,6 +8,7 @@ export type HttpRequestInput = {
   method: 'GET' | 'POST'
   body?: unknown
   accessToken?: string | null
+  signal?: AbortSignal
 }
 
 export class ApiError extends Error {
@@ -26,6 +27,7 @@ export async function fetchApi({
   method,
   body,
   accessToken,
+  signal,
 }: HttpRequestInput): Promise<Response> {
   const headers = new Headers()
   if (body !== undefined) {
@@ -40,6 +42,7 @@ export async function fetchApi({
     credentials: 'include',
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   })
 }
 

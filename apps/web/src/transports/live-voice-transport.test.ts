@@ -111,6 +111,15 @@ function browserFixture() {
     })
   }
   const post = spyOn(ApiClient, 'post')
+  let uiController!: ReadableStreamDefaultController<Uint8Array>
+  const uiBody = new ReadableStream<Uint8Array>({
+    start(controller) {
+      uiController = controller
+    },
+  })
+  const uiStream = spyOn(ApiClient, 'stream').mockResolvedValue(
+    new Response(uiBody),
+  )
   const get = spyOn(ApiClient, 'get').mockImplementation(async ({ schema }) =>
     schema.parse({
       id: crypto.randomUUID(),
@@ -122,6 +131,8 @@ function browserFixture() {
   const statuses: VoiceStatus[] = []
   const errors: string[] = []
   const captions: string[] = []
+  const locationRequests: string[] = []
+  const placeNames: string[] = []
   const transport = new LiveVoiceTransport({
     onStatus: (status) => statuses.push(status),
     onError: (error) => errors.push(error),
@@ -129,6 +140,9 @@ function browserFixture() {
     onInputLevel: () => {},
     onAudioReady: () => {},
     onAudioEnded: () => {},
+    onLocationRequest: (_sessionId, requestId) =>
+      locationRequests.push(requestId),
+    onPlaceCard: (card) => placeNames.push(card.places[0]?.name ?? ''),
   })
   return {
     transport,
@@ -136,12 +150,20 @@ function browserFixture() {
     media,
     post,
     get,
+    locationRequests,
+    placeNames,
+    emitUi(event: unknown) {
+      uiController.enqueue(
+        new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`),
+      )
+    },
     statuses,
     errors,
     captions,
     restore() {
       post.mockRestore()
       get.mockRestore()
+      uiStream.mockRestore()
       for (const [name, descriptor] of previous) {
         if (descriptor) {
           Object.defineProperty(globalThis, name, descriptor)
@@ -152,6 +174,67 @@ function browserFixture() {
     },
   }
 }
+
+test('browser receives location tool requests and place cards without UI polling', async () => {
+  const fixture = browserFixture()
+  fixture.post.mockImplementation(async (path, _body, schema) =>
+    schema.parse(
+      path === '/v1/voice/sessions'
+        ? { id: crypto.randomUUID(), sdp: 'answer' }
+        : undefined,
+    ),
+  )
+
+  try {
+    await fixture.transport.start()
+    const requestId = crypto.randomUUID()
+    fixture.emitUi({ type: 'location-request', requestId })
+    fixture.emitUi({
+      type: 'place-card',
+      card: {
+        id: crypto.randomUUID(),
+        note: 'Nearby coffee',
+        category: 'cafe',
+        query: '',
+        travelMode: 'WALK',
+        places: [
+          {
+            name: 'Test Cafe',
+            address: 'Main Street',
+            url: 'https://maps.google.com',
+            distanceMeters: 100,
+            durationSeconds: 60,
+          },
+        ],
+      },
+    })
+    fixture.emitUi({
+      type: 'place-card',
+      card: {
+        id: crypto.randomUUID(),
+        note: 'Hotels farther out',
+        category: 'hotel',
+        query: '',
+        travelMode: 'DRIVE',
+        places: [
+          {
+            name: 'Test Hotel',
+            address: 'North Road',
+            url: 'https://maps.google.com/?q=hotel',
+            distanceMeters: 12000,
+            durationSeconds: 900,
+          },
+        ],
+      },
+    })
+    await Bun.sleep(0)
+    expect(fixture.locationRequests).toEqual([requestId])
+    expect(fixture.placeNames).toEqual(['Test Cafe', 'Test Hotel'])
+    await fixture.transport.stop()
+  } finally {
+    fixture.restore()
+  }
+})
 
 test('browser captions stream with spaces; mute and Stop retain media until server finalizes', async () => {
   const fixture = browserFixture()

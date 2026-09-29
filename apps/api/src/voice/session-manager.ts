@@ -1,4 +1,5 @@
 import type {
+  LocationService,
   MemoryService,
   SessionUpdate,
   Snapshot,
@@ -12,8 +13,10 @@ import {
   type SidebandEvent,
   sidebandEventSchema,
 } from './events.js'
+import type { PlacesService } from './places.js'
 import type { SidebandSocket, VoiceChatProvider } from './provider.js'
-import { executeMemoryTool } from './tools.js'
+import { executeLocationTool, executeMemoryTool } from './tools.js'
+import { UIEventChannel } from './ui-event-channel.js'
 
 /** A final-event waiter installed before sending commands that may resolve it synchronously. */
 class Deferred<T> {
@@ -95,6 +98,7 @@ export type VoiceSessionManagerOptions = {
 /** Owns provider transports, delegated tool work and transcript flushes through finalization. */
 export class VoiceSessionManager {
   private active = new Map<string, ActiveSession>()
+  readonly uiEventChannel = new UIEventChannel()
 
   /** Setup tasks are tracked separately until they become active or finish cleanup. */
   private creating = new Map<AbortController, Promise<unknown>>()
@@ -106,6 +110,8 @@ export class VoiceSessionManager {
     private readonly memory: MemoryService,
     private readonly transcriptService: TranscriptService,
     private readonly voice: VoiceChatProvider,
+    private readonly location: LocationService,
+    private readonly places: PlacesService,
     private options: VoiceSessionManagerOptions = {},
   ) {
     const dependencies = {
@@ -113,6 +119,8 @@ export class VoiceSessionManager {
       memory,
       transcripts: transcriptService,
       voice,
+      location,
+      places,
     }
 
     for (const [name, service] of Object.entries(dependencies)) {
@@ -501,21 +509,43 @@ export class VoiceSessionManager {
     }
 
     if (!call) {
-      call = {
-        signature,
-        result: executeMemoryTool(
+      let execution: Promise<object>
+
+      if (
+        item.name === 'get_user_location' ||
+        item.name === 'find_nearby_places'
+      ) {
+        execution = executeLocationTool(
+          this.location,
+          this.places,
+          this.uiEventChannel,
+          session.id,
+          item.name,
+          item.arguments,
+        )
+      } else {
+        execution = executeMemoryTool(
           this.memory,
           session.id,
           item.name,
           item.arguments,
         )
+      }
+
+      call = {
+        signature,
+        result: execution
           .then((result) => JSON.stringify({ ok: true, ...result }))
           .catch(() => {
-            session.failure ??= 'Memory tool failed'
+            session.failure ??=
+              item.name === 'find_nearby_places' ||
+              item.name === 'get_user_location'
+                ? 'Places tool failed'
+                : 'Memory tool failed'
             return JSON.stringify({
               ok: false,
               error:
-                'Memory operation failed. Do not claim success; explain the failure to the user.',
+                'Tool operation failed. Do not claim success; explain the failure to the user.',
             })
           }),
       }
@@ -539,6 +569,10 @@ export class VoiceSessionManager {
     void pending
       .finally(() => work.pending.delete(pending))
       .catch(() => this.fail(session, 'Tool result delivery failed'))
+  }
+
+  hasActiveSession(id: string): boolean {
+    return this.active.has(id)
   }
 
   /**
@@ -732,6 +766,7 @@ export class VoiceSessionManager {
           deadline - Date.now(),
         )
       } finally {
+        this.uiEventChannel.closeSession(session.id)
         this.active.delete(session.id)
       }
     }
@@ -784,6 +819,7 @@ export class VoiceSessionManager {
       session.closed.resolve(false)
       clearInterval(session.timer)
       session.socket.close()
+      this.uiEventChannel.closeSession(session.id)
     }
   }
 }

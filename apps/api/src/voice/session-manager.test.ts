@@ -216,14 +216,24 @@ test('close deadline forces hangup and records unconfirmed usage', async () => {
 })
 
 test('failed sideband setup closes the provider session and records local failure', async () => {
-  const { provider, socket, sessions, memory, transcripts, hangups } =
-    voiceFixture()
+  const {
+    provider,
+    socket,
+    sessions,
+    memory,
+    transcripts,
+    location,
+    places,
+    hangups,
+  } = voiceFixture()
   provider.attach = () => socket
   const manager = new VoiceSessionManager(
     sessions,
     memory,
     transcripts,
     provider,
+    location,
+    places,
     {
       openTimeoutMs: 10,
       endTimeoutMs: 20,
@@ -239,7 +249,8 @@ test('failed sideband setup closes the provider session and records local failur
 })
 
 test('draining aborts creation and cleans up late provider completion', async () => {
-  const { sessions, memory, transcripts, provider, hangups } = voiceFixture()
+  const { sessions, memory, transcripts, provider, location, places, hangups } =
+    voiceFixture()
   let release!: (value: { sessionId: string; sdp: string }) => void
   let signal: AbortSignal | undefined
   provider.create = async (_sdp, inputSignal) => {
@@ -253,6 +264,8 @@ test('draining aborts creation and cleans up late provider completion', async ()
     memory,
     transcripts,
     provider,
+    location,
+    places,
   )
   const creation = manager.create('offer')
   const rejected = creation.then(
@@ -386,7 +399,7 @@ test('a timed-out tool cannot send late output after transport cleanup', async (
 })
 
 test('missing persistence service rejects runtime construction', () => {
-  const { sessions, transcripts, provider } = voiceFixture()
+  const { sessions, transcripts, provider, location, places } = voiceFixture()
   expect(
     () =>
       new VoiceSessionManager(
@@ -394,6 +407,8 @@ test('missing persistence service rejects runtime construction', () => {
         undefined as unknown as MemoryService,
         transcripts,
         provider,
+        location,
+        places,
       ),
   ).toThrow('memory is required')
 })

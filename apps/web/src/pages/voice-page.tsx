@@ -2,6 +2,8 @@ import { LogOut, Mic, MicOff, Play, Square } from 'lucide-react'
 import { useState } from 'react'
 import { Brand } from '../components/brand'
 import { LiveCaptions } from '../components/live-captions'
+import { LocationControl } from '../components/location-control'
+import { NearbyPlacesCard } from '../components/nearby-places-card'
 import { Button } from '../components/ui/button'
 import {
   Tooltip,
@@ -11,11 +13,14 @@ import {
 } from '../components/ui/tooltip'
 import { VoiceOrb } from '../components/voice-orb'
 import { useAuth } from '../hooks/use-auth'
+import { useLocationTracking } from '../hooks/use-location-tracking'
 import { useVoiceSession } from '../hooks/use-voice-session'
 
 export function VoicePage() {
   const { logout } = useAuth()
-  const voice = useVoiceSession()
+  const location = useLocationTracking()
+  const voice = useVoiceSession(undefined, location.requestFromTool)
+  const placeCard = voice.placeCard
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const active = voice.status === 'connected' || voice.status === 'connecting'
   const hasStarted = active || voice.status === 'stopping'
@@ -41,26 +46,29 @@ export function VoicePage() {
       <div className="flex min-h-svh flex-col overflow-hidden bg-[#f7f8fb]">
         <header className="mx-auto flex w-full max-w-[1190px] items-center justify-between px-6 py-7 sm:px-9">
           <Brand />
-          <Tooltip delayDuration={3000}>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                type="button"
-                onClick={signOut}
-                aria-label="Sign out"
-                className="size-10 rounded-full bg-transparent text-[#68758a] shadow-none transition-colors duration-300 ease-in-out hover:bg-white hover:text-[#c44858]"
+          <div className="flex items-center gap-2">
+            <LocationControl location={location} />
+            <Tooltip delayDuration={3000}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  type="button"
+                  onClick={signOut}
+                  aria-label="Sign out"
+                  className="size-10 rounded-full bg-transparent text-[#68758a] shadow-none transition-colors duration-300 ease-in-out hover:bg-white hover:text-[#c44858]"
+                >
+                  <LogOut className="size-[18px]" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                className="border border-[#e1e6ef] bg-white text-[#4b586e] shadow-sm [&_svg]:bg-white [&_svg]:fill-white"
               >
-                <LogOut className="size-[18px]" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent
-              side="bottom"
-              className="border border-[#e1e6ef] bg-white text-[#4b586e] shadow-sm [&_svg]:bg-white [&_svg]:fill-white"
-            >
-              Sign out
-            </TooltipContent>
-          </Tooltip>
+                Sign out
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </header>
         <main className="flex flex-1 flex-col items-center justify-center px-5 pb-16">
           <h1 className="sr-only">Voice session</h1>
@@ -139,6 +147,13 @@ export function VoicePage() {
             </p>
           )}
         </main>
+        {placeCard && (
+          <NearbyPlacesCard
+            key={placeCard.id}
+            card={placeCard}
+            onDismiss={voice.dismissPlaceCard}
+          />
+        )}
       </div>
     </TooltipProvider>
   )

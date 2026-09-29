@@ -18,6 +18,8 @@ export type VoiceTransportEvents = {
   onAudioReady: () => void
   onAudioEnded: () => void
   onError: (message: string) => void
+  onLocationRequest?: (sessionId: string, requestId: string) => void
+  onPlaceCard?: (card: PlaceCard) => void
 }
 
 export interface VoiceTransport {
@@ -32,3 +34,8 @@ export interface VoiceTransport {
 export type VoiceTransportFactory = (
   events: VoiceTransportEvents,
 ) => VoiceTransport
+
+import type { placeCardSchema } from '@voice/contracts'
+import type { z } from 'zod'
+
+export type PlaceCard = z.infer<typeof placeCardSchema>

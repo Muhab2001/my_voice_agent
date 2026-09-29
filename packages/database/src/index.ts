@@ -63,6 +63,7 @@ export function newDrizzleDatabase({
   return { client: drizzle(pool), resource: new DrizzleResource(pool) }
 }
 
+export * from './location-service.js'
 export * from './memory-service.js'
 export { DEFAULT_LIVE_MODEL } from './schema.js'
 export * from './transcript-service.js'

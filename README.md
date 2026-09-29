@@ -9,6 +9,7 @@ Requires Bun 1.3.11 and Docker Compose for the container workflow. Copy `.env.ex
 | Variable | Purpose |
 | --- | --- |
 | `OPENAI_API_KEY` | Server-only OpenAI key with access to `gpt-live-1` and `gpt-6-luna`. |
+| `GOOGLE_MAPS_API_KEY` | Server-only key with Places API (New) enabled for coffee shops, restaurants, hotels, parks, and other place searches. |
 | `APP_PASSWORD` | Shared login password, at least 12 characters. |
 | `JWT_SIGNING_SECRET` | HS256 signing secret, at least 32 characters. |
 | `DATABASE_URL` | PostgreSQL connection URL. |
@@ -53,7 +54,7 @@ Use `bun run typecheck`, `bun run lint`, and `bun run test` for checks. `bun run
 Login with `POST /v1/auth/login` and JSON `{ "password": "..." }`. It returns a 15-minute access JWT and sets a seven-day HttpOnly refresh cookie. `POST /v1/auth/refresh` issues a new access JWT without extending the cookie lifetime. `POST /v1/auth/logout` clears the browser cookie; the client must also discard its access JWT. Because refresh tokens are stateless, a copied token remains valid until it expires or the signing key changes. Cross-origin browser requests need `credentials: 'include'`; the API allows only `ALLOWED_ORIGIN`. Browsers may still block third-party cookies when the Vercel and Render hosts are on different sites, so the deployment should use a same-site API domain or a same-origin proxy if that occurs.
 
 
-## Voice and memory
+## Voice, memory, and nearby places
 
 Authenticated voice routes use the in-memory access JWT:
 
@@ -63,12 +64,17 @@ Authenticated voice routes use the in-memory access JWT:
 | `GET /v1/voice/sessions/{id}` | Local status, error, and finalization state; the UI polls this to surface sideband/tool failures. |
 | `POST /v1/voice/sessions/{id}/end` | Idempotent `204` after bounded cleanup. Check status for confirmed or incomplete finalization. |
 | `GET /v1/voice/sessions/{id}/transcripts` | Up to 5,000 merged speaker passages ordered by session time. |
+| `POST /v1/location` | Save an updated browser position. |
+| `POST /v1/voice/sessions/{id}/location/{requestId}` | Answer a pending location tool call after granting or denying access. |
+| `GET /v1/voice/sessions/{id}/ui-events` | Authenticated event stream for location requests and places cards. |
 
 The server creates `gpt-live-1` sessions with `gpt-6-luna` Responses delegation. It attaches one outbound WebSocket per session before returning the answer. The browser data channel receives captions and lifecycle events; private function events and commands are restricted to the server. No API key is returned to the browser. See the official [WebRTC guide](https://developers.openai.com/api/docs/guides/voice-webrtc) and [delegation guide](https://developers.openai.com/api/docs/guides/live-delegation).
 
 The server appends transcript fragments every second and on close. Spaces are preserved. Snapshots are text chunks with speaker and millisecond intervals, rather than completed turns or audio recordings. Both transcripts and memories are retained in PostgreSQL. Transcript reads use the `merged_transcripts` database view, which concatenates consecutive snapshots from the same speaker without changing their spaces. Speaker changes start a new passage; historical snapshots are merged too. This is a readable grouping rather than a provider-defined turn boundary, because Live delta events do not include turn IDs. In TablePlus, refresh the schema and open **Views → merged_transcripts**, or run `SELECT * FROM merged_transcripts ORDER BY session_id, start_ms, created_at, id`. Raw incremental rows remain in `transcript_snapshots`.
 
 Memory is shared across this installation. The backend searches before saving durable facts the user explicitly states, recalls relevant facts through bounded keyword/entity/event-time queries, and corrects an existing row by ID. `remember_fact` inserts immediately; `correct_memory` replaces content and metadata in place. An exact normalized content/entity/time fingerprint prevents identical concurrent saves. Paraphrases depend on model retrieval and judgment. Tool retries with the same call ID return the cached result during the session. Failed tools return an honest error to the backend and surface in the UI.
+
+On page entry, a small popup by the location icon offers an access switch when browser permission is not already granted. The browser permission prompt appears when the switch is turned on or the disabled location icon is clicked. `get_user_location` reads an existing saved position or sends a location request to the browser through the authenticated event stream and waits for a grant or denial. The browser saves a granted position before the tool returns its result. After a grant, the browser posts a refreshed position every ten minutes while the page is open. The icon turns blue and becomes noninteractive. Browser site permission can be changed in browser settings. Browser geolocation requires HTTPS or localhost. `find_nearby_places` uses the latest saved row, even if old, and searches Google Places for coffee shops, restaurants, hotels, parks, and specific other place types within a requested radius of up to 50 km. Broad named types use Nearby Search (New); specific text requests use Text Search (New), whose location circle biases results rather than strictly bounding them. Both request walking or driving route summaries. Each new result replaces the browser's current places card through the authenticated event stream. Run `bun run migrate` before starting an updated deployment to create `user_location`. Keep `GOOGLE_MAPS_API_KEY` on the API server; it is never sent to the browser.
 
 On shutdown, the API rejects new sessions, aborts pending creation, and drains active calls concurrently. Tool results and continuations finish before `session.close`; final usage/reason is saved when `session.closed` arrives. Missing final events are recorded as incomplete, and the server attempts provider hangup. The shutdown budget is 12 seconds inside Compose’s 15-second allowance.
 

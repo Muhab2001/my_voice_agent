@@ -4,7 +4,7 @@ import { createApp } from '../app.js'
 import { voiceFixture } from '../testing/voice-fixture.js'
 
 test('voice routes authenticate, validate, expose local transcripts and reject creation while draining', async () => {
-  const { manager, socket } = voiceFixture()
+  const { manager, socket, location } = voiceFixture()
   const auth = new AuthService({
     password: 'correct-password',
     signingSecret: '12345678901234567890123456789012',
@@ -15,6 +15,7 @@ test('voice routes authenticate, validate, expose local transcripts and reject c
   const app = createApp({
     auth,
     voice: manager,
+    location,
     resources: {
       ping: async () => ({ healthy: true, details: {} }),
       close: async () => {},

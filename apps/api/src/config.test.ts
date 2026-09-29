@@ -5,6 +5,7 @@ import { loadEnv } from './env.js'
 
 const minimumEnv = {
   OPENAI_API_KEY: 'test-key',
+  GOOGLE_MAPS_API_KEY: 'test-google-key',
   APP_PASSWORD: 'correct-password',
   JWT_SIGNING_SECRET: '12345678901234567890123456789012',
   DATABASE_URL: 'postgres://voice:voice@127.0.0.1:5432/voice',

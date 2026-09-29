@@ -63,3 +63,46 @@ export const transcriptSnapshotSchema = z.object({
 export const transcriptResponseSchema = z
   .object({ snapshots: z.array(transcriptSnapshotSchema) })
   .openapi('Transcripts')
+
+export const locationInputSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracyMeters: z.number().min(0).max(100_000),
+})
+export const locationToolReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('granted'), ...locationInputSchema.shape }),
+  z.object({ status: z.literal('denied') }),
+])
+export const locationToolReplyParamsSchema = voiceIdSchema.extend({
+  requestId: z.string().uuid(),
+})
+export const placeCategorySchema = z.enum([
+  'cafe',
+  'restaurant',
+  'hotel',
+  'park',
+  'other',
+])
+export const placeCardSchema = z.object({
+  id: z.string().uuid(),
+  note: z.string(),
+  category: placeCategorySchema,
+  query: z.string(),
+  travelMode: z.enum(['WALK', 'DRIVE']),
+  places: z.array(
+    z.object({
+      name: z.string(),
+      address: z.string(),
+      url: z.string().url(),
+      distanceMeters: z.number().nullable(),
+      durationSeconds: z.number().nullable(),
+    }),
+  ),
+})
+export const voiceUiEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('location-request'),
+    requestId: z.string().uuid(),
+  }),
+  z.object({ type: z.literal('place-card'), card: placeCardSchema }),
+])

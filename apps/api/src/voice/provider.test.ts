@@ -15,7 +15,13 @@ test('voice and memory configuration stays server-owned; frontend cannot receive
     liveConfig.delegation.responses.tools?.map((tool) =>
       tool.type === 'function' ? tool.name : '',
     ),
-  ).toEqual(['search_memory', 'remember_fact', 'correct_memory'])
+  ).toEqual([
+    'search_memory',
+    'remember_fact',
+    'correct_memory',
+    'get_user_location',
+    'find_nearby_places',
+  ])
 
   expect(liveConfig.client?.data_channel.allowed_client_events).toEqual([])
 

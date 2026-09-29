@@ -68,7 +68,7 @@ test('SIGTERM drains an in-flight request and exits promptly', async () => {
   }
 }, 10_000)
 
-test('SIGTERM completes pending memory, transcripts and provider finalization before closing resources', async () => {
+test('SIGTERM closes SSE after pending tools and provider finalization', async () => {
   const child = spawn(process.execPath, ['src/testing/shutdown-fixture.ts'], {
     cwd: new URL('..', import.meta.url).pathname,
     env: { ...process.env, PORT: '0', VOICE_SHUTDOWN: 'true' },
@@ -92,7 +92,37 @@ test('SIGTERM completes pending memory, transcripts and provider finalization be
       }
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
+
+    const port = Number(output.match(/API listening on (\d+)/)?.[1])
+    const sessionId = output.match(/Voice session ready: ([a-f0-9-]+)/)?.[1]
+
+    if (!port || !sessionId) {
+      throw new Error(`Voice fixture did not start: ${output}`)
+    }
+
+    const login = await fetch(`http://127.0.0.1:${port}/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'correct-password' }),
+    })
+    expect(login.status).toBe(200)
+    const token = (await login.json()) as { accessToken: string }
+    const events = await fetch(
+      `http://127.0.0.1:${port}/v1/voice/sessions/${sessionId}/ui-events`,
+      { headers: { authorization: `Bearer ${token.accessToken}` } },
+    )
+    expect(events.status).toBe(200)
+    const reader = events.body?.getReader()
+
+    if (!reader) {
+      throw new Error('Missing SSE body')
+    }
+
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain(
+      'event: ready',
+    )
     child.kill('SIGTERM')
+    expect((await reader.read()).done).toBe(true)
     const [code] = await exited
     expect(code).toBe(0)
     expect(output).toContain('memory=1 transcript=1 finalization=confirmed')

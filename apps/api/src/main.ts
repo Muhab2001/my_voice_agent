@@ -1,6 +1,7 @@
 import { AuthService } from '@voice/auth'
 import { NewRedisCache } from '@voice/cache'
 import {
+  DrizzleLocationService,
   DrizzleMemoryService,
   DrizzleTranscriptService,
   DrizzleVoiceSessionService,
@@ -10,6 +11,7 @@ import { ResourceManager } from '@voice/resource-manager'
 import { createApp } from './app.js'
 import { loadEnv } from './env.js'
 import { type ServerState, startApiServer } from './server.js'
+import { GooglePlacesService } from './voice/places.js'
 import { GPTLiveVoiceChatProvider } from './voice/provider.js'
 import { VoiceSessionManager } from './voice/session-manager.js'
 
@@ -54,14 +56,18 @@ try {
   })
 
   const state: ServerState = { shuttingDown: false }
+  const location = new DrizzleLocationService(database.client)
   const voice = new VoiceSessionManager(
     new DrizzleVoiceSessionService(database.client),
     new DrizzleMemoryService(database.client),
     new DrizzleTranscriptService(database.client),
     new GPTLiveVoiceChatProvider(env.OPENAI_API_KEY),
+    location,
+    new GooglePlacesService(env.GOOGLE_MAPS_API_KEY),
   )
   const app = createApp({
     voice,
+    location,
     auth,
     resources,
     allowedOrigin: env.ALLOWED_ORIGIN,

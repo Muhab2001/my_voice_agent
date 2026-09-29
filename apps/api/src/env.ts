@@ -5,6 +5,7 @@ export function loadEnv(runtimeEnv: NodeJS.ProcessEnv = process.env) {
   return createEnv({
     server: {
       OPENAI_API_KEY: z.string().min(1),
+      GOOGLE_MAPS_API_KEY: z.string().min(1),
       APP_PASSWORD: z.string().min(12),
       JWT_SIGNING_SECRET: z.string().min(32),
       DATABASE_URL: z.string().url(),

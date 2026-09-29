@@ -1,4 +1,8 @@
-import { voiceAnswerSchema, voiceStatusSchema } from '@voice/contracts'
+import {
+  voiceAnswerSchema,
+  voiceStatusSchema,
+  voiceUiEventSchema,
+} from '@voice/contracts'
 import { ApiClient } from '../lib/api-client'
 import { liveVoiceEventSchema } from './live-voice-events.js'
 import type { VoiceTransport, VoiceTransportEvents } from './types'
@@ -26,6 +30,8 @@ export class LiveVoiceTransport implements VoiceTransport {
   private muted = false
   private ending: Promise<void> | null = null
   private polling: number | null = null
+  private uiController: AbortController | null = null
+  private uiReader: ReadableStreamDefaultReader<Uint8Array> | null = null
   private connectTimer: number | null = null
   private disconnectTimer: number | null = null
   private captions = { user: '', assistant: '' }
@@ -153,6 +159,12 @@ export class LiveVoiceTransport implements VoiceTransport {
         () => this.fail('Voice session did not connect. Please try again.'),
         15_000,
       )
+      await this.openUiEvents(result.id)
+
+      if (this.stopped) {
+        return
+      }
+
       await peer.setRemoteDescription({ type: 'answer', sdp: result.sdp })
       this.polling = window.setInterval(() => {
         void this.pollStatus()
@@ -170,6 +182,92 @@ export class LiveVoiceTransport implements VoiceTransport {
             : 'Could not start the voice session.'
       this.fail(message)
       throw error
+    }
+  }
+
+  /** Receive app UI events on one authenticated stream; tool results remain on the private sideband. */
+  private async openUiEvents(id: string) {
+    const controller = new AbortController()
+    this.uiController = controller
+
+    try {
+      const response = await ApiClient.stream(
+        `/v1/voice/sessions/${id}/ui-events`,
+        controller.signal,
+      )
+
+      if (response.body) {
+        void this.readUiEvents(response.body, id, controller.signal)
+      }
+    } catch {
+      if (!this.stopped) {
+        this.events.onError(
+          'Place and location events could not connect. Try restarting the voice session.',
+        )
+      }
+    }
+  }
+
+  private async readUiEvents(
+    body: ReadableStream<Uint8Array>,
+    id: string,
+    signal: AbortSignal,
+  ) {
+    const reader = body.getReader()
+    this.uiReader = reader
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let ended = false
+
+    try {
+      while (!signal.aborted) {
+        const chunk = await reader.read()
+
+        if (chunk.done) {
+          ended = true
+          break
+        }
+
+        buffer += decoder.decode(chunk.value, { stream: true })
+        let boundary = buffer.indexOf('\n\n')
+
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary)
+          buffer = buffer.slice(boundary + 2)
+          const data = frame
+            .split('\n')
+            .filter((line) => line.startsWith('data: '))
+            .map((line) => line.slice(6))
+            .join('\n')
+
+          if (data) {
+            const event = voiceUiEventSchema.safeParse(JSON.parse(data))
+
+            if (event.success && event.data.type === 'location-request') {
+              this.events.onLocationRequest?.(id, event.data.requestId)
+            } else if (event.success && event.data.type === 'place-card') {
+              this.events.onPlaceCard?.(event.data.card)
+            }
+          }
+
+          boundary = buffer.indexOf('\n\n')
+        }
+      }
+    } catch {
+      if (ended && !signal.aborted && !this.stopped) {
+        this.events.onError(
+          'Place and location updates were interrupted. Restart the voice session.',
+        )
+      }
+    } finally {
+      this.uiReader = null
+      reader.releaseLock()
+
+      if (!signal.aborted && !this.stopped) {
+        this.events.onError(
+          'Place and location updates ended. Restart the voice session.',
+        )
+      }
     }
   }
 
@@ -316,6 +414,9 @@ export class LiveVoiceTransport implements VoiceTransport {
     if (this.polling !== null) {
       window.clearInterval(this.polling)
     }
+
+    this.uiController?.abort()
+    void this.uiReader?.cancel()
 
     if (this.connectTimer !== null) {
       window.clearTimeout(this.connectTimer)

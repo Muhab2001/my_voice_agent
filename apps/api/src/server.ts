@@ -12,8 +12,22 @@ export function startApiServer(
   state: ServerState,
   voice: VoiceSessionManager,
 ): Server<undefined> {
-  const server = Bun.serve({ fetch: app.fetch, port, hostname: '0.0.0.0' })
-  console.log(`API listening on ${port}`)
+  const server = Bun.serve({
+    fetch(request, server) {
+      if (
+        /^\/v1\/voice\/sessions\/[^/]+\/ui-events$/.test(
+          new URL(request.url).pathname,
+        )
+      ) {
+        server.timeout(request, 0)
+      }
+
+      return app.fetch(request)
+    },
+    port,
+    hostname: '0.0.0.0',
+  })
+  console.log(`API listening on ${server.port}`)
 
   async function shutdown() {
     if (state.shuttingDown) {

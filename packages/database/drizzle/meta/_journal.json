@@ -29,6 +29,13 @@
       "when": 1790624950927,
       "tag": "0003_merged_transcripts",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790704334119,
+      "tag": "0004_dizzy_stick",
+      "breakpoints": true
     }
   ]
 }
