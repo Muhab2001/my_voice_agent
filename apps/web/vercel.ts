@@ -15,8 +15,8 @@ const origin = parsedApiOrigin.origin
 export const config = {
   framework: 'vite',
   installCommand: 'bun install --frozen-lockfile --linker hoisted',
-  buildCommand: 'bun run --cwd apps/web build',
-  outputDirectory: 'apps/web/dist',
+  buildCommand: 'bun run build',
+  outputDirectory: 'dist',
   rewrites: [
     { source: '/v1/:path*', destination: `${origin}/v1/:path*` },
     { source: '/health/:path*', destination: `${origin}/health/:path*` },

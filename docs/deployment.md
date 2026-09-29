@@ -1,7 +1,8 @@
 # Deploy Sarjy to Render and Vercel
 
 The Render Blueprint provisions the Bun API, PostgreSQL, and Key Value. Vercel
-builds the Vite UI from the repository root. Requests to `/v1/*` and
+builds the Vite UI from `apps/web`, with shared workspace packages available
+from the repository. Requests to `/v1/*` and
 `/health/*` pass through Vercel to Render, so the browser sees one origin.
 Verify refresh cookie handling on the live deployment as described below.
 
@@ -40,10 +41,14 @@ discards its current contents.
 
 ## 3. Create the Vercel project
 
-1. Import the same GitHub repository as a Vercel project. Set **Root
-   Directory** to the repository root (`.`), so Vercel reads `vercel.ts` and
-   the Bun workspace packages. The file sets the Vite framework, install and
-   build commands, output directory, and routing rules.
+1. Import the same GitHub repository as a Vercel project. Choose **Import
+   single project** for the `web` Vite app and keep **Root Directory** at
+   `apps/web`, so Vercel reads `apps/web/vercel.ts`. In the Root Directory
+   settings, keep **Include source files outside of the Root Directory in the
+   Build Step** enabled so the `@voice/contracts` workspace package and root
+   `bun.lock` are available. Vercel normally enables this for new projects.
+   The file sets the Vite framework, install and build commands, output
+   directory, and routing rules.
 2. In **Settings → Environment Variables**, add `RENDER_API_ORIGIN` with the
    actual Render HTTPS origin from step 2 for **Production**. Add it for
    Preview too if preview deployments should call the same API. Do not set
@@ -51,13 +56,14 @@ discards its current contents.
 3. Deploy. Record the production Vercel origin and set Render
    `ALLOWED_ORIGIN` to that exact origin. Redeploy or restart the Render API
    after changing its environment variable.
-4. Redeploy Vercel if the Render URL changes. `vercel.ts` generates proxy
-   rewrites from `RENDER_API_ORIGIN` for each deployment.
+4. Redeploy Vercel if the Render URL changes. `apps/web/vercel.ts` generates
+   proxy rewrites from `RENDER_API_ORIGIN` for each deployment.
 
 If using the Vercel CLI instead of Git import, run `vercel login`, then
-`vercel link` at the repository root, set `RENDER_API_ORIGIN` on the linked
-project, and run `vercel --prod`. The `.vercel` link directory is ignored by
-Git. CLI access and network connectivity are required.
+`vercel link` from the repository root and select the `apps/web` project. Set
+`RENDER_API_ORIGIN` on the linked project, then run `vercel --prod`. The
+`.vercel` link directory is ignored by Git. CLI access and network connectivity
+are required.
 
 ## 4. Verify the public app
 
