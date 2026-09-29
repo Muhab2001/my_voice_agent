@@ -51,8 +51,10 @@ discards its current contents.
    directory, and routing rules.
 2. Set the Vercel environment variable `RENDER_API_ORIGIN` to the Render API
    origin, for example `https://sarjy-api.onrender.com` (without a trailing
-   slash). `apps/web/vercel.ts` uses it for `/v1` and `/health` rewrites. Leave
-   `VITE_API_BASE_URL` unset; the web client calls same-origin `/v1` routes.
+   slash) on the Vercel project serving the public domain. Each Vercel project
+   has separate environment settings. `apps/web/vercel.ts` uses it for `/v1`
+   and `/health` routing. Leave `VITE_API_BASE_URL` unset; the web client calls
+   same-origin `/v1` routes.
 3. Deploy. Record the production Vercel origin and set Render
    `ALLOWED_ORIGIN` to that exact origin. Redeploy or restart the Render API
    after changing its environment variable.
@@ -69,7 +71,9 @@ are required.
 
 1. Visit `<vercel-origin>/health/ready`; it should show an `ok` status with
    PostgreSQL and Redis reachable. This checks the Vercel proxy as well as
-   the API.
+   the API. If it returns the web app's `index.html`, the API route is falling
+   through to the SPA route; check the project's deployment and
+   `RENDER_API_ORIGIN` setting.
 2. Sign in with `APP_PASSWORD`, inspect the login response for a `Set-Cookie`
    header, reload the page, and verify that the session restores. This checks
    whether the external rewrite forwards the refresh cookie as expected.
