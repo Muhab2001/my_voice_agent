@@ -43,25 +43,26 @@ discards its current contents.
 
 1. Import the same GitHub repository as a Vercel project. Choose **Import
    single project** for the `web` Vite app and keep **Root Directory** at
-   `apps/web`, so Vercel reads `apps/web/vercel.ts`. In the Root Directory
+   `apps/web`, so Vercel reads `apps/web/vercel.json`. In the Root Directory
    settings, keep **Include source files outside of the Root Directory in the
    Build Step** enabled so the `@voice/contracts` workspace package and root
    `bun.lock` are available. Vercel normally enables this for new projects.
    The file sets the Vite framework, install and build commands, output
    directory, and routing rules.
-2. In **Settings → Environment Variables**, add `RENDER_API_ORIGIN` with the
-   actual Render HTTPS origin from step 2 for **Production**. Add it for
-   Preview too if preview deployments should call the same API. Do not set
-   `VITE_API_BASE_URL`; the web client should call same-origin `/v1` routes.
+2. The rewrite destinations in `apps/web/vercel.json` point to
+   `https://sarjy-api.onrender.com`. If the Render API URL differs, update the
+   two destinations before deploying. No Vercel environment variables are
+   required for this frontend. Leave `VITE_API_BASE_URL` unset; the web client
+   calls same-origin `/v1` routes.
 3. Deploy. Record the production Vercel origin and set Render
    `ALLOWED_ORIGIN` to that exact origin. Redeploy or restart the Render API
    after changing its environment variable.
-4. Redeploy Vercel if the Render URL changes. `apps/web/vercel.ts` generates
-   proxy rewrites from `RENDER_API_ORIGIN` for each deployment.
+4. Redeploy Vercel if the Render URL changes, after updating the two external
+   rewrites in `apps/web/vercel.json`.
 
 If using the Vercel CLI instead of Git import, run `vercel login`, then
-`vercel link` from the repository root and select the `apps/web` project. Set
-`RENDER_API_ORIGIN` on the linked project, then run `vercel --prod`. The
+`vercel link` from the repository root and select the `apps/web` project, then
+run `vercel --prod`. The
 `.vercel` link directory is ignored by Git. CLI access and network connectivity
 are required.
 
