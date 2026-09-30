@@ -1,19 +1,24 @@
-import { voiceUiEventSchema } from '@voice/contracts'
-import { ApiClient } from '../lib/api-client'
-import type { VoiceUiEvent } from './types'
+import { voiceUiEventSchema as uiEventSchema } from '@voice/contracts'
+import type { z } from 'zod'
+import type { AuthenticatedFetch } from '../lib/http'
 
-export interface VoiceUiEventHandlers {
-  onEvent(event: VoiceUiEvent): void
+export type UIEvent = z.infer<typeof uiEventSchema>
+
+export interface UIEventHandlers {
+  onEvent(event: UIEvent): void
   onError(message: string): void
 }
 
 /** Reads authenticated browser UI events independently of WebRTC media and lifecycle. */
-export class VoiceUiEventStream {
+export class UIEventStream {
   private readonly controller = new AbortController()
   private reader?: ReadableStreamDefaultReader<Uint8Array>
   private started = false
 
-  constructor(private readonly handlers: VoiceUiEventHandlers) {}
+  constructor(
+    private readonly handlers: UIEventHandlers,
+    private readonly request: AuthenticatedFetch,
+  ) {}
 
   async start(sessionId: string): Promise<void> {
     if (this.started) {
@@ -23,10 +28,11 @@ export class VoiceUiEventStream {
     this.started = true
 
     try {
-      const response = await ApiClient.stream(
-        `/v1/voice/sessions/${sessionId}/ui-events`,
-        this.controller.signal,
-      )
+      const response = await this.request({
+        path: `/v1/voice/sessions/${sessionId}/ui-events`,
+        method: 'GET',
+        signal: this.controller.signal,
+      })
 
       if (this.controller.signal.aborted) {
         return
@@ -45,7 +51,7 @@ export class VoiceUiEventStream {
     }
   }
 
-  stop(): void {
+  end(): void {
     this.controller.abort()
     void this.reader?.cancel().catch(() => {})
   }
@@ -61,7 +67,7 @@ export class VoiceUiEventStream {
       while (!this.controller.signal.aborted) {
         const chunk = await reader.read()
 
-        if (chunk.done) {
+        if (this.controller.signal.aborted || chunk.done) {
           break
         }
 
@@ -93,6 +99,10 @@ export class VoiceUiEventStream {
   }
 
   private handleFrame(frame: string): void {
+    if (this.controller.signal.aborted) {
+      return
+    }
+
     const data = frame
       .split('\n')
       .filter((line) => line.startsWith('data: '))
@@ -104,7 +114,7 @@ export class VoiceUiEventStream {
     }
 
     try {
-      const event = voiceUiEventSchema.safeParse(JSON.parse(data))
+      const event = uiEventSchema.safeParse(JSON.parse(data))
 
       if (event.success) {
         this.handlers.onEvent(event.data)

@@ -1,10 +1,9 @@
 import { LogOut, Mic, MicOff, Play, Square } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Brand } from '../components/brand'
+import { FloatingCards } from '../components/floating-cards'
 import { LiveCaptions } from '../components/live-captions'
 import { LocationControl } from '../components/location-control'
-import { NearbyPlacesCard } from '../components/nearby-places-card'
-import { ReservationPanel } from '../components/reservation-panel'
 import { Button } from '../components/ui/button'
 import {
   Tooltip,
@@ -13,53 +12,83 @@ import {
   TooltipTrigger,
 } from '../components/ui/tooltip'
 import { VoiceOrb } from '../components/voice-orb'
+import { useAudioManager } from '../hooks/use-audio-manager'
 import { useAuth } from '../hooks/use-auth'
+import { useFloatingCards } from '../hooks/use-floating-cards'
 import { useLocationTracking } from '../hooks/use-location-tracking'
-import { useReservation } from '../hooks/use-reservation'
-import { useVoiceSession } from '../hooks/use-voice-session'
-import { useVoiceUiEvents } from '../hooks/use-voice-ui-events'
+import type { SessionConnection } from '../hooks/use-session-manager'
+import { useSessionManager } from '../hooks/use-session-manager'
+import { useTranscripts } from '../hooks/use-transcripts'
+import { useUIEventStream } from '../hooks/use-ui-event-stream'
 
 export function VoicePage() {
   const { logout } = useAuth()
   const location = useLocationTracking()
-  const reservation = useReservation()
-  const voice = useVoiceSession()
-  const ui = useVoiceUiEvents(
-    location.requestFromTool,
-    reservation.receiveState,
-    reservation.receiveOptions,
-  )
-  useEffect(() => {
-    if (voice.status === 'idle' || voice.status === 'error') {
-      ui.stop()
-    }
-
-    if (voice.status === 'connected' || voice.status === 'idle') {
-      void reservation.refresh()
-    }
-  }, [voice.status, reservation.refresh, ui.stop])
-  const placeCard = ui.placeCard
+  const cards = useFloatingCards()
+  const session = useSessionManager()
+  const audio = useAudioManager()
+  const transcripts = useTranscripts()
+  const ui = useUIEventStream(cards.receive)
+  const [startError, setStartError] = useState<string | null>(null)
   const [logoutError, setLogoutError] = useState<string | null>(null)
-  const active = voice.status === 'connected' || voice.status === 'connecting'
-  const hasStarted = active || voice.status === 'stopping'
+  const active =
+    session.status === 'connected' || session.status === 'connecting'
+  const hasStarted = active || session.status === 'stopping'
   const sessionAction = active
     ? 'Stop session'
-    : voice.status === 'stopping'
+    : session.status === 'stopping'
       ? 'Stopping session'
       : 'Start session'
+  const error =
+    startError || session.error || audio.error || ui.error || logoutError
+
+  const stopSession = useCallback(async () => {
+    ui.end()
+    await session.end()
+  }, [ui.end, session.end])
+
+  useEffect(() => {
+    if (session.status === 'ended' || session.status === 'failed') {
+      void stopSession()
+    }
+  }, [session.status, stopSession])
 
   async function startSession() {
-    reservation.hide()
-    const sessionId = await voice.start()
+    let connection: SessionConnection | null = null
 
-    if (sessionId) {
-      await ui.start(sessionId)
+    try {
+      connection = session.prepare()
+
+      if (!connection) {
+        return
+      }
+
+      setStartError(null)
+      cards.clear()
+      transcripts.start(connection)
+      await audio.start(connection)
+
+      if (connection.signal.aborted) {
+        return
+      }
+
+      const created = await session.start()
+
+      if (!created || connection.signal.aborted) {
+        return
+      }
+
+      await ui.start(created.id)
+    } catch (cause) {
+      if (!connection?.signal.aborted) {
+        setStartError(
+          cause instanceof Error
+            ? cause.message
+            : 'Could not start the session.',
+        )
+        await stopSession()
+      }
     }
-  }
-
-  async function stopSession() {
-    ui.stop()
-    await voice.stop()
   }
 
   async function signOut() {
@@ -112,15 +141,15 @@ export function VoicePage() {
               >
                 Ready when you are
               </p>
-              <LiveCaptions items={voice.transcript} />
+              <LiveCaptions items={transcripts.items} />
             </div>
             <VoiceOrb
-              status={voice.status}
-              muted={voice.muted}
-              audioPlaying={voice.audioPlaying}
-              audioReady={voice.audioReady}
-              inputLevel={voice.inputLevel}
-              onReplay={voice.replayAudio}
+              connected={session.status === 'connected'}
+              muted={audio.muted}
+              audioPlaying={audio.audioPlaying}
+              audioReady={audio.audioReady}
+              inputLevel={audio.inputLevel}
+              onReplay={audio.replayAudio}
             />
             <div className="mt-8 flex items-center gap-4">
               <Tooltip>
@@ -130,7 +159,11 @@ export function VoicePage() {
                     type="button"
                     variant="ghost"
                     onClick={active ? stopSession : startSession}
-                    disabled={voice.status === 'stopping'}
+                    disabled={
+                      session.status === 'stopping' ||
+                      !location.data ||
+                      Boolean(location.error)
+                    }
                     aria-label={sessionAction}
                     className={`size-13 rounded-full border-0 bg-transparent p-0 shadow-none transition-colors duration-200 hover:bg-[#edf2ff] hover:text-primary ${active ? 'text-primary' : 'text-[#77859a]'}`}
                   >
@@ -149,15 +182,15 @@ export function VoicePage() {
                     variant="ghost"
                     size="icon"
                     type="button"
-                    onClick={voice.toggleMute}
-                    disabled={voice.status !== 'connected'}
+                    onClick={audio.toggleMute}
+                    disabled={session.status !== 'connected'}
                     aria-label={
-                      voice.muted ? 'Unmute microphone' : 'Mute microphone'
+                      audio.muted ? 'Unmute microphone' : 'Mute microphone'
                     }
-                    aria-pressed={voice.muted}
-                    className={`size-13 rounded-full border-0 bg-transparent p-0 shadow-none transition-colors duration-200 hover:bg-transparent hover:text-[#c44858] disabled:opacity-100 ${voice.muted ? 'text-[#c44858]' : 'text-[#77859a]'}`}
+                    aria-pressed={audio.muted}
+                    className={`size-13 rounded-full border-0 bg-transparent p-0 shadow-none transition-colors duration-200 hover:bg-transparent hover:text-[#c44858] disabled:opacity-100 ${audio.muted ? 'text-[#c44858]' : 'text-[#77859a]'}`}
                   >
-                    {voice.muted ? (
+                    {audio.muted ? (
                       <MicOff className="size-5" />
                     ) : (
                       <Mic className="size-5" />
@@ -165,28 +198,21 @@ export function VoicePage() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  {voice.muted ? 'Unmute' : 'Mute'}
+                  {audio.muted ? 'Unmute' : 'Mute'}
                 </TooltipContent>
               </Tooltip>
             </div>
           </div>
-          {(voice.error || ui.error || logoutError) && (
+          {error && (
             <p
               className="mt-7 max-w-sm text-center text-sm text-destructive"
               role="alert"
             >
-              {voice.error || ui.error || logoutError}
+              {error}
             </p>
           )}
-          {reservation.visible && <ReservationPanel {...reservation} />}
         </main>
-        {placeCard && (
-          <NearbyPlacesCard
-            key={placeCard.id}
-            card={placeCard}
-            onDismiss={ui.dismissPlaceCard}
-          />
-        )}
+        <FloatingCards cards={cards.cards} onDismiss={cards.dismiss} />
       </div>
     </TooltipProvider>
   )

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import type { VoiceStatus } from '../transports/types'
 
 const barNames = ['far-left', 'near-left', 'center', 'near-right', 'far-right']
 const barFrames = [
@@ -11,7 +10,7 @@ const barFrames = [
 ]
 
 type Props = {
-  status: VoiceStatus
+  connected: boolean
   muted: boolean
   audioPlaying: boolean
   audioReady: boolean
@@ -20,7 +19,7 @@ type Props = {
 }
 
 export function VoiceOrb({
-  status,
+  connected,
   muted,
   audioPlaying,
   audioReady,
@@ -28,14 +27,14 @@ export function VoiceOrb({
   onReplay,
 }: Props) {
   const speakingStrength =
-    status === 'connected' && !muted
+    connected && !muted
       ? Math.min(1, Math.max(0, (inputLevel - 0.02) * 3.2))
       : 0
   const [speakingVisible, setSpeakingVisible] = useState(false)
   const [barFrame, setBarFrame] = useState(0)
 
   useEffect(() => {
-    if (status !== 'connected' || muted || audioPlaying) {
+    if (!connected || muted || audioPlaying) {
       setSpeakingVisible(false)
       return
     }
@@ -45,7 +44,7 @@ export function VoiceOrb({
     }
     const timer = window.setTimeout(() => setSpeakingVisible(false), 350)
     return () => window.clearTimeout(timer)
-  }, [status, muted, audioPlaying, speakingStrength])
+  }, [connected, muted, audioPlaying, speakingStrength])
 
   useEffect(() => {
     if (!audioPlaying && !speakingVisible) {
@@ -108,14 +107,10 @@ export function VoiceOrb({
       />
       <button
         type="button"
-        disabled={status !== 'connected' || !audioReady || audioPlaying}
+        disabled={!connected || !audioReady || audioPlaying}
         onClick={onReplay}
-        aria-label="Replay sample sound"
-        title={
-          status === 'connected' && audioReady
-            ? 'Replay sample sound'
-            : undefined
-        }
+        aria-label="Enable assistant audio"
+        title={connected && audioReady ? 'Enable assistant audio' : undefined}
         className="relative grid size-[205px] cursor-pointer place-items-center overflow-hidden rounded-full bg-gradient-to-br from-[#6681d2] to-[#a4b5e9] text-white shadow-[0_18px_45px_#4566bd25] transition-transform duration-500 ease-out focus-visible:outline-3 focus-visible:outline-offset-4 focus-visible:outline-primary disabled:cursor-default sm:size-[255px]"
         style={{ transform: `scale(${scale})` }}
       >

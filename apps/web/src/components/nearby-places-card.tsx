@@ -1,3 +1,4 @@
+import type { placeCardSchema } from '@voice/contracts'
 import {
   BedDouble,
   Coffee,
@@ -6,14 +7,16 @@ import {
   Trees,
   UtensilsCrossed,
 } from 'lucide-react'
-import type { PlaceCard } from '../ui-events/types'
+import type { z } from 'zod'
 import { FloatingCard } from './floating-card'
 
+type PlaceCard = z.infer<typeof placeCardSchema>
+
 export function NearbyPlacesCard({
-  card,
+  places,
   onDismiss,
 }: {
-  card: PlaceCard
+  places: PlaceCard
   onDismiss: () => void
 }) {
   const category = {
@@ -21,24 +24,24 @@ export function NearbyPlacesCard({
     restaurant: { label: 'Restaurants', icon: UtensilsCrossed },
     hotel: { label: 'Hotels', icon: BedDouble },
     park: { label: 'Parks', icon: Trees },
-    other: { label: card.query, icon: MapPin },
-  }[card.category]
+    other: { label: places.query, icon: MapPin },
+  }[places.category]
   const Icon = category.icon
 
   return (
     <FloatingCard
       title={category.label}
-      note={card.note}
+      note={places.note}
       icon={<Icon className="size-5" />}
       onDismiss={onDismiss}
     >
       <div className="max-h-72 space-y-1 overflow-y-auto">
-        {card.places.length === 0 && (
+        {places.places.length === 0 && (
           <p className="py-3 text-sm text-[#68758a]">
             No places found in this area.
           </p>
         )}
-        {card.places.map((place) => (
+        {places.places.map((place) => (
           <a
             key={place.url}
             href={place.url}
@@ -66,7 +69,7 @@ export function NearbyPlacesCard({
               <span className="block">
                 {place.durationSeconds === null
                   ? 'Time —'
-                  : `${Math.max(1, Math.ceil(place.durationSeconds / 60))} min ${card.travelMode === 'WALK' ? 'walk' : 'drive'}`}
+                  : `${Math.max(1, Math.ceil(place.durationSeconds / 60))} min ${places.travelMode === 'WALK' ? 'walk' : 'drive'}`}
               </span>
             </span>
             <ExternalLink className="size-3.5 shrink-0 text-[#9ba8ba] group-hover:text-primary" />
