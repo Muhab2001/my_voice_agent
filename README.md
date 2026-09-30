@@ -1,84 +1,96 @@
 # Sarjy
 
-Sarjy is a shared-password voice assistant with a React UI, a Hono/Bun API, and PostgreSQL memory. Browser microphone and assistant audio use GPT-Live over WebRTC. The API owns prompts, model configuration, a private sideband WebSocket, transcript persistence, and Responses-backed memory tools.
+Sarjy is a single-user voice assistant with persistent memory, nearby places, and a hotel reservation workflow. It uses React/Vite, a Bun/Hono API, PostgreSQL, GPT-Live, and a delegated Responses model.
 
-## API setup
+## Architecture
 
-Requires Bun 1.3.11 and Docker Compose for the container workflow. Copy `.env.example` to `.env` and replace `APP_PASSWORD` and `JWT_SIGNING_SECRET` with local values. The JWT secret must be at least 32 characters. `.env` is ignored by Git. `COOKIE_SECURE=false` is for local HTTP only; set it to `true` behind HTTPS.
+```mermaid
+sequenceDiagram
+  participant Browser as Browser UI
+  participant API as Bun / Hono API
+  participant Live as OpenAI GPT-Live
+  participant DB as PostgreSQL
+  Browser->>API: HTTPS: SDP offer
+  API->>Live: Create session
+  Live-->>API: SDP answer + provider ID
+  API->>Live: Attach sideband WebSocket
+  API-->>Browser: Local ID + SDP answer
+  Browser->>Live: WebRTC: microphone
+  Live-->>Browser: WebRTC: audio + captions
+  Live-->>API: Sideband WS: tool calls
+  API-->>Live: Sideband WS: tool results
+  API->>DB: Save state + transcripts
+  API-->>Browser: HTTP SSE: UI cards
+  Note over Live: GPT-6-luna handles delegated tool reasoning
+```
 
-| Variable | Purpose |
-| --- | --- |
-| `OPENAI_API_KEY` | Server-only OpenAI key with access to `gpt-live-1` and `gpt-6-luna`. |
-| `GOOGLE_MAPS_API_KEY` | Server-only key with Places API (New) enabled for coffee shops, restaurants, hotels, parks, and other place searches. |
-| `APP_PASSWORD` | Shared login password, at least 12 characters. |
-| `JWT_SIGNING_SECRET` | HS256 signing secret, at least 32 characters. |
-| `DATABASE_URL` | PostgreSQL connection URL. |
-| `DATABASE_POOL_MAX`, `DATABASE_POOL_MIN` | Pool size bounds; defaults `10` and `0`. |
-| `DATABASE_IDLE_TIMEOUT_MS` | Idle client timeout; defaults to `10000`. `0` disables idle eviction. |
-| `DATABASE_CONNECTION_TIMEOUT_MS` | Connection wait timeout; defaults to `3000`. `0` disables it. |
-| `DATABASE_QUERY_TIMEOUT_MS` | Query timeout; defaults to `3000`. `0` disables it. |
-| `DATABASE_MAX_LIFETIME_SECONDS` | Maximum client lifetime; defaults to `0` (disabled). |
-| `ALLOWED_ORIGIN` | Browser origin allowed to call the API with credentials. |
-| `PORT` | API port; defaults to `3000`. |
-| `COOKIE_SECURE` | `false` for local HTTP with `SameSite=Lax`; `true` for HTTPS with `SameSite=None; Secure`. Defaults to `true`. |
-| `VITE_API_BASE_URL` | Optional public API origin for a deployed web app. Local Vite uses a same-origin proxy by default. |
+The API negotiates the session and keeps the OpenAI key, prompts, and tools private. The browser then sends and receives audio directly over WebRTC, avoiding an extra API hop and its latency. GPT-Live handles full-duplex speech and interruptions for a more natural conversation. The server's sideband WebSocket handles trusted tool work and transcript persistence; authenticated HTTP SSE pushes generated UI events to the browser. See [architecture details](docs/architecture.md).
 
-Start the API, PostgreSQL, and one-shot migration with:
+**Memory:** The delegated model searches PostgreSQL before saving durable facts and preferences. It can recall or correct a memory by ID. Exact duplicates are blocked by a database fingerprint; retrieval currently uses bounded keyword, entity, and time filters. Transcript snapshots are also stored in PostgreSQL.
+
+**Workflow:** The model can request hotel options and fill reservation fields in any order. The reservation service validates each change, calculates the quote, derives the next missing field from saved state, and publishes progress/options over SSE. Revision checks prevent stale writes. Confirmation requires an explicit voice request or browser click and rechecks the quote. This hotel workflow is code-defined today.
+
+## Install and operate
+
+Use Docker Compose (or Bun 1.3.11 for local processes). Copy `.env.example` to `.env`; set `APP_PASSWORD` (12+ characters), `JWT_SIGNING_SECRET` (32+ characters), `OPENAI_API_KEY`, and `GOOGLE_MAPS_API_KEY`.
 
 ```sh
 cp .env.example .env
 docker compose --env-file .env -f infra/local/docker-compose.yaml up --build
 ```
 
-The web app is at `http://localhost:5173`, the API at `http://localhost:3000`, Swagger UI at `http://localhost:3000/docs`, and the generated schema at `http://localhost:3000/openapi.json`. Health probes are `/health/live` and `/health/ready`. Readiness returns an overall status plus a flat `resources` map with a short status string for each dependency. Rebuild the API or web container after source changes. PostgreSQL binds to loopback port `5432`; its data is retained in a named volume after a normal `down`.
+Compose starts PostgreSQL, runs migrations and the hotel seed, then starts the API and UI. Open [localhost:5173](http://localhost:5173); the API is at [localhost:3000](http://localhost:3000), with Swagger at [localhost:3000/docs](http://localhost:3000/docs). Use `docker compose --env-file .env -f infra/local/docker-compose.yaml down` to stop; the database volume remains. Health checks are `/health/live` and `/health/ready`.
 
-For a non-Docker API process, start PostgreSQL yourself, set `DATABASE_URL` in `.env`, then run:
+For local processes instead of Compose, start PostgreSQL, set `DATABASE_URL` in `.env`, then run `bun install --frozen-lockfile --linker hoisted`, `set -a; . ./.env; set +a`, and `bun run migrate`. Run `bun run --cwd apps/api dev` and `bun run --cwd apps/web dev` in separate terminals with the environment loaded. Use `bun run lint`, `bun run typecheck`, `bun run test`, and `bun run build` to check changes. Database integration tests need an isolated `RESERVATION_TEST_DATABASE_URL` or `TEST_DATABASE_URL` as appropriate.
 
-```sh
-bun install --frozen-lockfile --linker hoisted
-set -a; . ./.env; set +a
-bun run migrate
-bun run --cwd apps/api dev
-bun run --cwd apps/web dev
+## Deployment
+
+```mermaid
+flowchart LR
+  subgraph Vercel
+    Web["Vite frontend<br/>API rewrites"]
+  end
+  subgraph Render["Render · Frankfurt"]
+    API["Bun / Hono API"]
+    DB[(PostgreSQL 16)]
+    API --> DB
+  end
+  subgraph OpenAI
+    Live[GPT-Live]
+    Responses[GPT-6-luna Responses]
+    Live --> Responses
+  end
+  subgraph Google
+    Places[Places API]
+  end
+  Web -->|"/v1 + /health"| API
+  API -->|"session + sideband"| Live
+  API -->|"place searches"| Places
 ```
 
-The two `dev` commands run in separate terminals. Vite proxies `/v1` and `/health` to `http://localhost:3000` locally. In Compose, the web service uses the internal API hostname. The UI stores the access token only in memory and restores browser sessions with the HttpOnly refresh cookie. Auth fetching lives in a separate SWR hook under `apps/web/src/hooks`; no global state library is used. Start requests microphone access and connects directly to OpenAI through WebRTC. Mute disables the microphone track while keeping the session active. Stop mutes audio and waits for the server to finish tool results, close the provider session, and flush transcripts before releasing media. Tap the orb if the browser blocks audio autoplay. The assistant handles spoken interruptions; a committed memory write remains saved if speech is interrupted.
-
-Use `bun run typecheck`, `bun run lint`, and `bun run test` for checks. `bun run format` applies Biome formatting. The one-off migration command lives in `apps/scripts` and validates only `DATABASE_URL`. To reset **only local Compose data**, stop the stack and remove its named volumes with `docker compose --env-file .env -f infra/local/docker-compose.yaml down --volumes`.
-
-## Hotel reservations
-
-The migration seeds four hotel locations and three room types per location. Each room type has one randomly chosen unavailable weekday; those counts stay fixed after migration. Booking dates use the `Asia/Riyadh` time zone. The app has one shared reservation history, matching its shared-password login.
-
-Ask the voice assistant to start or change a reservation, see hotel or room options, find confirmed stays, or resume an abandoned draft. Hotel options can be filtered by city, including partial names such as `Khobar` for `Al Khobar`, and, with a date, by room availability. The browser shows floating progress and options cards only when the conversation calls for them. After reviewing the quote, you can confirm by voice or with the browser's **Confirm reservation** button. `GET /v1/reservations/active` restores the latest state after reconnect, and `POST /v1/reservations/{id}/confirm` accepts browser confirmation with the displayed revision. Ending a voice session abandons an unfinished draft.
-
-Run the PostgreSQL state tests with `RESERVATION_TEST_DATABASE_URL` set to an isolated migrated database. The tests cover quote math, unavailable rooms, stale revisions, confirmation rechecks, abandoned drafts, and combined city/brand searches.
-
-Login with `POST /v1/auth/login` and JSON `{ "password": "..." }`. It returns a 15-minute access JWT and sets a seven-day HttpOnly refresh cookie. `POST /v1/auth/refresh` issues a new access JWT without extending the cookie lifetime. `POST /v1/auth/logout` clears the browser cookie; the client must also discard its access JWT. Because refresh tokens are stateless, a copied token remains valid until it expires or the signing key changes. Cross-origin browser requests need `credentials: 'include'`; the API allows only `ALLOWED_ORIGIN`. Browsers may still block third-party cookies when the Vercel and Render hosts are on different sites, so the deployment should use a same-site API domain or a same-origin proxy if that occurs.
-
-
-## Voice, memory, and nearby places
-
-Authenticated voice routes use the in-memory access JWT:
-
-| Method/path | Behavior |
+| Node | Deployment details |
 | --- | --- |
-| `POST /v1/voice/sessions` | JSON `{sdp}` offer; returns `201` with `{id, sdp}` containing our local UUID and the SDP answer. |
-| `GET /v1/voice/sessions/{id}` | Local status, error, and finalization state; the UI polls this to surface sideband/tool failures. |
-| `POST /v1/voice/sessions/{id}/end` | Idempotent `204` after bounded cleanup. Check status for confirmed or incomplete finalization. |
-| `GET /v1/voice/sessions/{id}/transcripts` | Up to 5,000 merged speaker passages ordered by session time. |
-| `POST /v1/location` | Save an updated browser position. |
-| `POST /v1/voice/sessions/{id}/location/{requestId}` | Answer a pending location tool call after granting or denying access. |
-| `GET /v1/voice/sessions/{id}/ui-events` | Authenticated event stream for location requests and places cards. |
+| Vercel frontend | Static Vite build. `RENDER_API_ORIGIN` routes API and health requests to Render; no frontend server to keep warm. |
+| Render API | Docker, Free plan, Frankfurt, 0.1 CPU / 512 MB. Runs migrations before listening; health check at `/health/ready`. Sleeps after 15 minutes without inbound traffic; waking takes about a minute. Free instances can restart, interrupting live SSE or sideband connections. |
+| Render PostgreSQL | Free PostgreSQL 16 in Frankfurt, 1 GB storage; expires 30 days after creation unless upgraded. |
+| OpenAI | Managed GPT-Live session with `gpt-6-luna` Responses delegation. Browser audio uses direct WebRTC; API tools use the sideband WebSocket. |
+| Google Places | Managed Places API, called only by the API with a server-held key. |
 
-The server creates `gpt-live-1` sessions with `gpt-6-luna` Responses delegation. It attaches one outbound WebSocket per session before returning the answer. The browser data channel receives captions and lifecycle events; private function events and commands are restricted to the server. No API key is returned to the browser. See the official [WebRTC guide](https://developers.openai.com/api/docs/guides/voice-webrtc) and [delegation guide](https://developers.openai.com/api/docs/guides/live-delegation).
+Set Render's `ALLOWED_ORIGIN` to the Vercel HTTPS origin. See [deployment steps](docs/deployment.md) and Render's [Free plan limits](https://render.com/docs/free).
 
-The server appends transcript fragments every second and on close. Spaces are preserved. Snapshots are text chunks with speaker and millisecond intervals, rather than completed turns or audio recordings. Both transcripts and memories are retained in PostgreSQL. Transcript reads use the `merged_transcripts` database view, which concatenates consecutive snapshots from the same speaker without changing their spaces. Speaker changes start a new passage; historical snapshots are merged too. This is a readable grouping rather than a provider-defined turn boundary, because Live delta events do not include turn IDs. In TablePlus, refresh the schema and open **Views → merged_transcripts**, or run `SELECT * FROM merged_transcripts ORDER BY session_id, start_ms, created_at, id`. Raw incremental rows remain in `transcript_snapshots`.
+## If this became a production app
 
-Memory is shared across this installation. The agent proactively saves user-stated facts and preferences that could help in future conversations, even when the user does not ask it to remember them. The backend searches before saving, recalls relevant facts through bounded keyword/entity/event-time queries, and corrects an existing row by ID. It skips guesses, transient chatter, and secrets. `remember_fact` inserts immediately; `correct_memory` replaces content and metadata in place. An exact normalized content/entity/time fingerprint prevents identical concurrent saves. Paraphrases depend on model retrieval and judgment. Tool retries with the same call ID return the cached result during the session. Failed tools return an honest error to the backend and surface in the UI.
-
-On page entry, a small popup by the location icon offers an access switch when browser permission is not already granted. The browser permission prompt appears when the switch is turned on or the disabled location icon is clicked. `get_user_location` reads an existing saved position or sends a location request to the browser through the authenticated event stream and waits for a grant or denial. The browser saves a granted position before the tool returns its result. After a grant, the browser posts a refreshed position every ten minutes while the page is open. The icon turns blue and becomes noninteractive. Browser site permission can be changed in browser settings. Browser geolocation requires HTTPS or localhost. `find_nearby_places` uses the latest saved row, even if old, and searches Google Places for coffee shops, restaurants, hotels, parks, and specific other place types within a requested radius of up to 50 km. Broad named types use Nearby Search (New); specific text requests use Text Search (New), whose location circle biases results rather than strictly bounding them. Both request walking or driving route summaries. Each new result replaces the browser's current places card through the authenticated event stream. Run `bun run migrate` before starting an updated deployment to create `user_location`. Keep `GOOGLE_MAPS_API_KEY` on the API server; it is never sent to the browser.
-
-On shutdown, the API rejects new sessions, aborts pending creation, and drains active calls concurrently. Tool results and continuations finish before `session.close`; final usage/reason is saved when `session.closed` arrives. Missing final events are recorded as incomplete, and the server attempts provider hangup. The shutdown budget is 12 seconds inside Compose’s 15-second allowance.
-
-The tests mock provider audio and sidebands. To run the PostgreSQL integration test against a disposable database, use `TEST_DATABASE_URL=postgres://... bun test apps/api/src/voice/services.test.ts`; it applies migrations. A microphone/browser smoke test still requires real model access: state a preference, Stop, Start a fresh session, ask for it, correct it, and verify the revised fact in another session. Also check denied microphone permission, mute, autoplay recovery, and spoken interruption. No automated check sends paid OpenAI requests.
+- Add tenant-scoped data and sessions; the current app has one shared user history.
+- Replace the shared password and stateless JWT setup with an identity provider.
+- Separate session creation, WebRTC setup, and WebRTC event handling more cleanly.
+- Improve memory retrieval with semantic search and a small agentic query operator.
+- Extract memories in a background agent from transcript snapshot diffs instead of relying on live model decisions.
+- Make workflows generic with reusable steps and dynamic JSON schemas, without code changes per workflow.
+- Add MCP support for external tools and data sources.
+- Model real provider costs per session, user, and workspace; enforce user and workspace quotas.
+- Cache inexpensive shared reads such as user status when scale warrants it.
+- Support session branching and UI checkpoints.
+- Add dark mode and improve the agent avatar's UI and interaction design.
+- Use more reliable infrastructure with warm capacity and enough graceful shutdown time for SSE and sideband connections.
+- Add end-to-end telemetry and tracing for connection failures, edge cases, and latency.
+- Expand end-to-end tests with Testcontainers instead of relying mainly on mocked services.
