@@ -66,7 +66,7 @@ const tool = (
 export const memoryTools: FunctionTool[] = [
   tool(
     'search_memory',
-    'Search shared saved facts using literal keywords, an exact entity label, and optional event-time bounds. Returns IDs for correction.',
+    'Recall saved personal facts. Query keywords match literal AND substrings. Use null for unknown entity or event-time filters. Broaden empty results; all-null filters return recent facts up to limit (maximum 20). Returns IDs for correction.',
     {
       query: { type: ['string', 'null'], maxLength: 256 },
       entity: label,

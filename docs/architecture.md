@@ -63,6 +63,8 @@ The voice model is `gpt-live-1`; the Responses backend is `gpt-6-luna`. These ar
 
 The Responses backend registers `search_memory`, `remember_fact`, and `correct_memory`. Arguments are validated by strict schemas; text, result count and keyword count are bounded. Queries use parameterized literal keyword matches plus optional exact entity and event-time bounds. The model searches before writing to avoid semantic duplicates; the database fingerprint also prevents identical concurrent inserts. Corrections replace existing facts by ID. Unknown tools, invalid input and lookup/write failures produce explicit error results and never fabricated success.
 
+Personal recall delegates to the backend before answering. Memory queries use short literal keywords; empty or irrelevant results are broadened, ending with a bounded recent-fact lookup. An unsuccessful lookup does not prove a fact was never saved. The prompts keep conversation/delegation guidance separate from backend workflow rules. Run `bun --env-file .env apps/api/src/voice/memory-prompt.eval.ts` for opt-in model checks using synthetic facts only; this does not read or write application memory. The regular tests do not call OpenAI.
+
 The sideband dispatches `response.event` envelopes and reads completed function calls from nested `response.output_item.done`. Results are sent as `response.item.create` / `function_call_output` with the original call ID. After all required outputs are sent and the response stream completes, `response.create` continues the backend. Completed outcomes remain cached per call ID for the session, so redelivery cannot repeat a write. Interrupting assistant speech does not cancel application memory commits.
 
 ## Lifecycle
