@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { SWRConfig } from 'swr'
 import { AppRoutes } from './app/routes'
+import { AuthProvider } from './auth/auth-provider'
 import './themes/global.css'
 
 const root = document.getElementById('root')
@@ -10,6 +11,8 @@ if (!root) {
 
 createRoot(root).render(
   <SWRConfig value={{ shouldRetryOnError: false }}>
-    <AppRoutes />
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   </SWRConfig>,
 )
