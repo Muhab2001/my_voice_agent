@@ -1,7 +1,7 @@
 import type { Hook } from '@hono/zod-openapi'
 import { errorSchema } from '@voice/contracts'
 import type { Context, ErrorHandler, NotFoundHandler } from 'hono'
-import type { ApiEnv } from './types.js'
+import type { ApiEnv } from '../app.js'
 
 export const jsonResponse = <T>(schema: T) => ({
   content: { 'application/json': { schema } },

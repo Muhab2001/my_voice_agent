@@ -2,8 +2,8 @@ import { createRoute, type RouteHandler } from '@hono/zod-openapi'
 import type { AuthService } from '@voice/auth'
 import { authResponseSchema, loginSchema } from '@voice/contracts'
 import { getCookie, setCookie } from 'hono/cookie'
+import type { ApiEnv } from '../app.js'
 import { errorResponse, fail, jsonResponse } from '../http/responses.js'
-import type { ApiEnv } from '../http/types.js'
 
 const refreshCookie = 'voice_refresh'
 

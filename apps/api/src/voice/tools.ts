@@ -94,13 +94,8 @@ export const memoryTools: FunctionTool[] = [
 
 export const locationTools: FunctionTool[] = [
   tool(
-    'get_user_location',
-    'Get the user’s latest saved location. If there is none, ask the browser to show its location switch and wait for the user’s grant or denial before returning. Call this when location is needed for a request.',
-    {},
-  ),
-  tool(
     'find_nearby_places',
-    'Find coffee shops, restaurants, hotels, parks, or another requested place type using the most recently saved location. Call get_user_location first when location has not been confirmed for the request. Set search_query to null for broad named categories; provide a specific search_query for other types or a specific request such as Italian restaurants. Increase radius_meters when the user asks for places farther away, up to 50000. The note is a short personal sentence shown above the place list; base it on the user’s request without inventing place facts.',
+    'Find coffee shops, restaurants, hotels, parks, or another requested place type using the most recently saved location. Set search_query to null for broad named categories; provide a specific search_query for other types or a specific request such as Italian restaurants. Increase radius_meters when the user asks for places farther away, up to 50000. The note is a short personal sentence shown above the place list; base it on the user’s request without inventing place facts.',
     {
       category: { type: 'string', enum: placeCategorySchema.options },
       search_query: { type: ['string', 'null'], maxLength: 100 },
@@ -554,40 +549,6 @@ export async function executeLocationTool(
   }
 
   const parsed: unknown = JSON.parse(argumentsJson)
-
-  if (name === 'get_user_location') {
-    z.object({}).strict().parse(parsed)
-    const saved = await location.latest()
-
-    if (saved) {
-      return {
-        status: 'granted',
-        location: {
-          latitude: saved.latitude,
-          longitude: saved.longitude,
-          accuracyMeters: saved.accuracyMeters,
-        },
-      }
-    }
-
-    const reply = await ui.requestLocation(sessionId)
-
-    if (reply.status === 'denied') {
-      return {
-        status: 'denied',
-        message: 'The user did not enable location access.',
-      }
-    }
-
-    return {
-      status: 'granted',
-      location: {
-        latitude: reply.latitude,
-        longitude: reply.longitude,
-        accuracyMeters: reply.accuracyMeters,
-      },
-    }
-  }
 
   if (name !== 'find_nearby_places') {
     throw new Error('Unknown location tool')

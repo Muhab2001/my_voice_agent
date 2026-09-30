@@ -22,7 +22,6 @@ test('voice and memory configuration stays server-owned; frontend cannot receive
     'search_memory',
     'remember_fact',
     'correct_memory',
-    'get_user_location',
     'find_nearby_places',
     'get_active_reservation',
     'start_reservation',

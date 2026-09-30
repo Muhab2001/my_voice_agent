@@ -6,8 +6,8 @@ import {
 } from '@voice/contracts'
 import { ReservationError, type ReservationService } from '@voice/database'
 import { z } from 'zod'
+import type { ApiEnv } from '../app.js'
 import { errorResponse, fail, jsonResponse } from '../http/responses.js'
-import type { ApiEnv } from '../http/types.js'
 
 const reservationIdSchema = z.object({ id: z.string().uuid() })
 const conflictResponse = jsonResponse(

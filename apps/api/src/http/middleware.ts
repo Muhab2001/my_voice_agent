@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { AuthService } from '@voice/auth'
 import type { MiddlewareHandler } from 'hono'
+import type { ApiEnv } from '../app.js'
 import { fail } from './responses.js'
-import type { ApiEnv } from './types.js'
 
 export const requestId: MiddlewareHandler<ApiEnv> = async (c, next) => {
   const id = randomUUID()

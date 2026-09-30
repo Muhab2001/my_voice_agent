@@ -69,13 +69,6 @@ export const locationInputSchema = z.object({
   longitude: z.number().min(-180).max(180),
   accuracyMeters: z.number().min(0).max(100_000),
 })
-export const locationToolReplySchema = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('granted'), ...locationInputSchema.shape }),
-  z.object({ status: z.literal('denied') }),
-])
-export const locationToolReplyParamsSchema = voiceIdSchema.extend({
-  requestId: z.string().uuid(),
-})
 export const placeCategorySchema = z.enum([
   'cafe',
   'restaurant',
@@ -100,10 +93,6 @@ export const placeCardSchema = z.object({
   ),
 })
 export const voiceUiEventSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('location-request'),
-    requestId: z.string().uuid(),
-  }),
   z.object({ type: z.literal('place-card'), card: placeCardSchema }),
   z.object({
     type: z.literal('reservation-state'),

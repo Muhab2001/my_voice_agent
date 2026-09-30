@@ -1,8 +1,8 @@
 import { voiceIdSchema } from '@voice/contracts'
 import type { Handler } from 'hono'
 import { streamSSE } from 'hono/streaming'
+import type { ApiEnv } from '../app.js'
 import { fail } from '../http/responses.js'
-import type { ApiEnv } from '../http/types.js'
 import type { VoiceSessionManager } from '../voice/session-manager.js'
 
 /** Streams browser-facing events for one authenticated voice session. */

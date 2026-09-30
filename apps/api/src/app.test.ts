@@ -271,7 +271,7 @@ test('location updates require authentication and valid coordinates', async () =
   ])
 })
 
-test('voice UI stream delivers a location request and the answer resolves its tool', async () => {
+test('voice UI stream delivers events and closes when the session ends', async () => {
   const fixture = voiceFixture()
   const auth = new AuthService({
     password: 'correct-password',
@@ -309,31 +309,14 @@ test('voice UI stream delivers a location request and the answer resolves its to
   }
 
   await reader.read()
-  const pending = fixture.manager.uiEventChannel.requestLocation(id)
+  fixture.manager.uiEventChannel.emit(id, {
+    type: 'reservation-options',
+    kind: 'hotels',
+    options: { message: 'Choose a hotel' },
+  })
   const frame = new TextDecoder().decode((await reader.read()).value)
-  const requestId = fixture.manager.uiEventChannel.requestId(id)
-  expect(frame).toContain('location-request')
-
-  if (!requestId) {
-    throw new Error('Missing location request ID')
-  }
-
-  const reply = await app.request(
-    `/v1/voice/sessions/${id}/location/${requestId}`,
-    {
-      method: 'POST',
-      headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        status: 'granted',
-        latitude: 24.7,
-        longitude: 46.7,
-        accuracyMeters: 12,
-      }),
-    },
-  )
-  expect(reply.status).toBe(204)
-  expect(await pending).toMatchObject({ status: 'granted', latitude: 24.7 })
-  expect(await fixture.location.latest()).toMatchObject({ latitude: 24.7 })
+  expect(frame).toContain('reservation-options')
+  expect(frame).toContain('Choose a hotel')
   await fixture.manager.end(id)
   expect((await reader.read()).done).toBe(true)
   controller.abort()

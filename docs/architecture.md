@@ -8,11 +8,15 @@ The Bun workspace contains a React/Vite frontend, a Hono API, shared contracts a
 flowchart LR
   subgraph Browser
     Page[VoicePage]
-    Transport[LiveVoiceTransport]
-    UiStream[VoiceUiEventStream]
-    Cards[Location and reservation cards]
-    Page -->|start voice| Transport
-    Transport -->|return local session ID| Page
+    Session[useSessionManager]
+    Audio[useAudioManager]
+    Transcripts[useTranscripts]
+    UiStream[UIEventStream]
+    Cards[Floating cards]
+    Page -->|prepare and start| Session
+    Session -->|shared connection and abort signal| Audio
+    Session -->|shared channel and abort signal| Transcripts
+    Session -->|return local session ID| Page
     Page -->|start with session ID| UiStream
     UiStream -->|validated UI events| Cards
   end
@@ -35,15 +39,15 @@ flowchart LR
   end
 
   Services --> Postgres[(PostgreSQL)]
-  Transport <-->|HTTP POST SDP offer, answer and session ID; status and end| Hono
-  Transport <-->|WebRTC audio and public caption data channel| Live
+  Session <-->|HTTP POST SDP offer, answer and session ID; status and end| Hono
+  Session <-->|owned WebRTC connection| Live
   Manager <-->|WebSocket sideband: private events and tool results| Live
   Hono -->|HTTP SSE GET ui-events| UiStream
 ```
 
 The browser sends an authenticated JSON SDP offer to `POST /v1/voice/sessions`. The API creates a local `voice_sessions` record, calls `client.live.create`, saves the provider session ID, and opens an authenticated sideband at `wss://api.openai.com/v1/live/sessions/{session_id}/attach`. It registers listeners immediately and waits for socket open before returning `{id, sdp}`. An attached session is already started; the API never sends `session.start`.
 
-Microphone and assistant audio travel directly between the browser and OpenAI through WebRTC. The browser’s data channel receives only captions, usage, lifecycle events, and errors. It cannot submit model changes or tool results, and cannot receive private Responses events. The API key, prompts, backend configuration and tool execution remain on the API server. `LiveVoiceTransport.start()` returns the local session ID; `VoicePage` passes it to `VoiceUiEventStream`, which receives validated location and reservation updates through authenticated HTTP SSE. The UI stream can fail without ending WebRTC audio. The browser separately polls the authenticated session-status endpoint to expose sideband and memory errors.
+Microphone and assistant audio travel directly between the browser and OpenAI through WebRTC. The browser’s data channel receives only captions, usage, lifecycle events, and errors. It cannot submit model changes or tool results, and cannot receive private Responses events. The API key, prompts, backend configuration and tool execution remain on the API server. `useSessionManager` owns SDP negotiation and the WebRTC connection. `useAudioManager` attaches microphone and playback handling, while `useTranscripts` listens to the shared data channel. Both detach when the session signal aborts. `VoicePage` passes the local session ID to `UIEventStream`, which receives validated floating-card updates through authenticated HTTP SSE. The UI stream can fail without ending WebRTC audio. The browser separately polls the authenticated session-status endpoint to expose sideband and memory errors.
 
 The voice model is `gpt-live-1`; the Responses backend is `gpt-6-luna`. These are server-owned constants. The Live prompt controls conversational style, interruptions, and when to delegate. The backend prompt controls memory use and truthful tool-result reporting. See the official [WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc), [server controls](https://developers.openai.com/api/docs/guides/voice-server-controls), and [delegation](https://developers.openai.com/api/docs/guides/live-delegation) documentation.
 
@@ -65,7 +69,7 @@ The sideband dispatches `response.event` envelopes and reads completed function 
 
 The session manager is constructed once in `main.ts` and is a required dependency of Hono and shutdown handling. It receives separate `VoiceSessionService`, `MemoryService`, and `TranscriptService` interfaces, each backed by its own Drizzle implementation. Session lifecycle records, durable facts, and transcript persistence stay within their respective services. `VoiceChatProvider` is implemented by the `GPTLiveVoiceChatProvider` class; its sideband adapter is also a class. Runtime construction failures close initialized resources and fail startup before the HTTP server listens. Sideband events are dispatched through switches into documented handlers, including nested Responses events. Active sockets, transcript buffers, pending tools and final-event waiters are owned by local session ID. Setup failure attempts provider hangup and records failure. Sideband loss is exposed through session status, flushes buffered transcripts, and triggers bounded cleanup. There is no reconnect loop.
 
-Stop disables browser audio input/output while retaining the WebRTC transport. The authenticated end endpoint is idempotent. The server drains existing tool results and Responses continuations, sends `session.close` with its final-event listener already registered, and waits for `session.closed` or the deadline. It saves final usage/reason, flushes transcripts and releases the sideband. Missing final events are recorded as incomplete; provider hangup is attempted before resources are released. The browser then releases microphone, audio and its peer connection. See [graceful close](https://developers.openai.com/api/docs/guides/live-conversations).
+Stop aborts the shared browser session signal: audio and transcript listeners detach, microphone tracks stop, and the session manager closes the data channel and peer connection once. The authenticated end endpoint is idempotent. The server drains existing tool results and Responses continuations, sends `session.close` with its final-event listener already registered, and waits for `session.closed` or the deadline. It saves final usage/reason, flushes transcripts and releases the sideband. Missing final events are recorded as incomplete; provider hangup is attempted before resources are released. Browser resources are already released while server finalization runs. See [graceful close](https://developers.openai.com/api/docs/guides/live-conversations).
 
 SIGTERM/SIGINT mark the process draining, reject new sessions, abort session creation and drain active sessions concurrently before closing PostgreSQL. Late creation completions are cleaned up. The overall shutdown budget is 12 seconds, leaving margin inside the deployment’s 15-second allowance. One API process owns its sidebands; horizontal session ownership requires a separate design.
 

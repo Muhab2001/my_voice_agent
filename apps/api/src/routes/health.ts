@@ -1,8 +1,8 @@
 import { createRoute, type RouteHandler } from '@hono/zod-openapi'
 import { healthSchema, readinessSchema } from '@voice/contracts'
 import type { RemoteResource } from '@voice/resource-manager'
+import type { ApiEnv } from '../app.js'
 import { jsonResponse } from '../http/responses.js'
-import type { ApiEnv } from '../http/types.js'
 
 export const liveRoute = createRoute({
   method: 'get',

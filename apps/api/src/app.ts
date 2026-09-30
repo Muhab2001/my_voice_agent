@@ -10,7 +10,6 @@ import {
   invalidRequestHook,
   notFoundHandler,
 } from './http/responses.js'
-import type { ApiEnv } from './http/types.js'
 import {
   loginHandler,
   loginRoute,
@@ -25,12 +24,7 @@ import {
   readyHandler,
   readyRoute,
 } from './routes/health.js'
-import {
-  locationToolReplyHandler,
-  locationToolReplyRoute,
-  saveLocationHandler,
-  saveLocationRoute,
-} from './routes/location.js'
+import { saveLocationHandler, saveLocationRoute } from './routes/location.js'
 import {
   activeReservationHandler,
   activeReservationRoute,
@@ -49,6 +43,12 @@ import {
 } from './routes/voice.js'
 import { voiceUiEventsHandler } from './routes/voice-ui-events.js'
 import type { VoiceSessionManager } from './voice/session-manager.js'
+
+export type ApiEnv = {
+  Variables: {
+    requestId: string
+  }
+}
 
 export type ApiDependencies = {
   voice: VoiceSessionManager
@@ -113,7 +113,6 @@ export function createApp({
   app.openapi(transcriptsRoute, transcriptsHandler(voice))
 
   app.openapi(saveLocationRoute, saveLocationHandler(location))
-  app.openapi(locationToolReplyRoute, locationToolReplyHandler(voice, location))
   app.get('/v1/voice/sessions/:id/ui-events', voiceUiEventsHandler(voice))
   app.openapi(activeReservationRoute, activeReservationHandler(reservations))
   app.openapi(confirmReservationRoute, confirmReservationHandler(reservations))

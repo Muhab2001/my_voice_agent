@@ -6,8 +6,8 @@ import {
   voiceOfferSchema,
   voiceStatusSchema,
 } from '@voice/contracts'
+import type { ApiEnv } from '../app.js'
 import { errorResponse, fail, jsonResponse } from '../http/responses.js'
-import type { ApiEnv } from '../http/types.js'
 import type { VoiceSessionManager } from '../voice/session-manager.js'
 
 export const createVoiceRoute = createRoute({

@@ -12,53 +12,6 @@ const args = JSON.stringify({
   note: 'A few coffee spots for your short break.',
 })
 
-test('location tool sends a browser request and returns its confirmed position', async () => {
-  let saved: SavedLocation | null = null
-  const location: LocationService = {
-    latest: async () => saved,
-    save: async (input) => {
-      saved = { ...input, recordedAt: new Date() }
-      return saved
-    },
-  }
-  const ui = new UIEventChannel()
-  const sessionId = crypto.randomUUID()
-  const events: unknown[] = []
-  ui.subscribe(
-    sessionId,
-    (event) => events.push(event),
-    () => {},
-  )
-  const result = executeLocationTool(
-    location,
-    { nearby: async () => [] },
-    ui,
-    sessionId,
-    'get_user_location',
-    '{}',
-  )
-  await Bun.sleep(0)
-  const requestId = ui.requestId(sessionId)
-  expect(requestId).not.toBeNull()
-  expect(events).toEqual([{ type: 'location-request', requestId }])
-
-  if (!requestId) {
-    throw new Error('Missing location request')
-  }
-
-  await location.save({ latitude: 24.7, longitude: 46.7, accuracyMeters: 20 })
-  ui.reply(sessionId, requestId, {
-    status: 'granted',
-    latitude: 24.7,
-    longitude: 46.7,
-    accuracyMeters: 20,
-  })
-  expect(await result).toEqual({
-    status: 'granted',
-    location: { latitude: 24.7, longitude: 46.7, accuracyMeters: 20 },
-  })
-})
-
 test('nearby tool emits its card without storing it on the server', async () => {
   const saved: SavedLocation = {
     latitude: 24.7,
@@ -160,7 +113,7 @@ test('hotel, park, and other searches accept a wider radius and publish distinct
   expect(cards[2]).toHaveProperty('card.query', 'museums')
 })
 
-test('closing a channel session ends subscribers and resolves a pending location request', async () => {
+test('closing a channel session ends subscribers', async () => {
   const channel = new UIEventChannel()
   const sessionId = crypto.randomUUID()
   let closed = 0
@@ -171,18 +124,15 @@ test('closing a channel session ends subscribers and resolves a pending location
       closed += 1
     },
   )
-  const pending = channel.requestLocation(sessionId)
 
   channel.closeSession(sessionId)
 
-  expect(await pending).toEqual({ status: 'denied' })
   expect(closed).toBe(1)
-  expect(channel.requestId(sessionId)).toBeNull()
   channel.closeSession(sessionId)
   expect(closed).toBe(1)
 })
 
-test('late UI subscribers receive the latest options and active location request', async () => {
+test('late UI subscribers receive only the latest options', async () => {
   const channel = new UIEventChannel()
   const sessionId = crypto.randomUUID()
   channel.emit(sessionId, {
@@ -195,7 +145,6 @@ test('late UI subscribers receive the latest options and active location request
     kind: 'hotels',
     options: { message: 'Latest' },
   })
-  const pending = channel.requestLocation(sessionId)
   const events: unknown[] = []
   channel.subscribe(
     sessionId,
@@ -209,10 +158,8 @@ test('late UI subscribers receive the latest options and active location request
       kind: 'hotels',
       options: { message: 'Latest' },
     },
-    { type: 'location-request', requestId: channel.requestId(sessionId) },
   ])
   channel.closeSession(sessionId)
-  expect(await pending).toEqual({ status: 'denied' })
   const afterClose: unknown[] = []
   channel.subscribe(
     sessionId,
