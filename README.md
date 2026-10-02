@@ -1,6 +1,6 @@
-# Sarjy
+# My personal voice assistant
 
-Sarjy is a single-user voice assistant with persistent memory, nearby places, and a hotel reservation workflow. It uses React/Vite, a Bun/Hono API, PostgreSQL, GPT-Live, and a delegated Responses model.
+My voice agent is a single-user voice assistant with persistent memory, nearby places, and a hotel reservation workflow. It uses React/Vite, a Bun/Hono API, PostgreSQL, GPT-Live, and a delegated Responses model.
 
 ## Architecture
 
