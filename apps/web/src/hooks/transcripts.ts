@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { z } from 'zod'
-import type { SessionConnection } from './use-session-manager'
+import type { SessionConnection } from './session-manager'
 
 /** Caption messages carried by the provider's WebRTC data channel. */
 const transcriptEventSchema = z.discriminatedUnion('type', [
@@ -15,6 +22,43 @@ const transcriptEventSchema = z.discriminatedUnion('type', [
 ])
 
 export type TranscriptItem = { id: string; text: string; fading?: boolean }
+
+function createTranscriptReceiver(
+  setItems: Dispatch<SetStateAction<TranscriptItem[]>>,
+) {
+  let role: 'user' | 'assistant' | null = null
+  let caption = ''
+  let id = ''
+
+  return (message: Event) => {
+    let payload: unknown
+
+    try {
+      payload = JSON.parse((message as MessageEvent).data)
+    } catch {
+      return
+    }
+
+    const parsed = transcriptEventSchema.safeParse(payload)
+
+    if (!parsed.success) {
+      return
+    }
+
+    const event = parsed.data
+    const nextRole =
+      event.type === 'session.input_transcript.delta' ? 'user' : 'assistant'
+
+    if (nextRole !== role) {
+      caption = ''
+      id = crypto.randomUUID()
+      role = nextRole
+    }
+
+    caption = (caption + event.delta).slice(-500)
+    setItems([{ id, text: caption }])
+  }
+}
 
 /** Subscribes to captions independently of microphone and incoming audio handling. */
 export function useTranscripts() {
@@ -35,38 +79,7 @@ export function useTranscripts() {
         return
       }
 
-      let role: 'user' | 'assistant' | null = null
-      let caption = ''
-      let id = ''
-
-      const receive = (message: Event) => {
-        let payload: unknown
-
-        try {
-          payload = JSON.parse((message as MessageEvent).data)
-        } catch {
-          return
-        }
-
-        const parsed = transcriptEventSchema.safeParse(payload)
-
-        if (!parsed.success) {
-          return
-        }
-
-        const event = parsed.data
-        const nextRole =
-          event.type === 'session.input_transcript.delta' ? 'user' : 'assistant'
-
-        if (nextRole !== role) {
-          caption = ''
-          id = crypto.randomUUID()
-          role = nextRole
-        }
-
-        caption = (caption + event.delta).slice(-500)
-        setItems([{ id, text: caption }])
-      }
+      const receive = createTranscriptReceiver(setItems)
 
       connection.channel.addEventListener('message', receive)
       connection.signal.addEventListener('abort', end, { once: true })

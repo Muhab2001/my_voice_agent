@@ -6,8 +6,8 @@ import {
   FakePeer,
 } from '../test-utils/audio-browser'
 import { renderAuthenticatedHook } from '../test-utils/render-hook'
-import { useAudioManager } from './use-audio-manager'
-import type { SessionConnection } from './use-session-manager'
+import { useAudioManager } from './audio-manager'
+import type { SessionConnection } from './session-manager'
 
 async function setup() {
   let fixture!: ReturnType<typeof browserFixture>

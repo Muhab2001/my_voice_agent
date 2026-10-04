@@ -3,12 +3,12 @@ import {
   createContext,
   type ReactNode,
   useCallback,
-  useEffect,
+  useRef,
   useState,
 } from 'react'
-import { SWRConfig } from 'swr'
-import type { z } from 'zod'
-import { ApiError, assertOk, fetchApi, parseJson } from '../lib/http'
+import useSWR, { SWRConfig } from 'swr'
+import { z } from 'zod'
+import { ApiError, readJSON, usePublicApi } from '../hooks/api'
 
 const AUTH_REFRESH_BUFFER_MS = 60_000
 const createCache = () => new Map()
@@ -23,126 +23,148 @@ export const AuthContext = createContext<{
   getAccessToken(rejectedToken?: string): Promise<string>
 } | null>(null)
 
-/** Owns authentication in React state and scopes protected SWR data to a session. */
+/** SWR restores and renews the session; a separate cache scopes protected data. */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<AuthSession | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<Error | null>(null)
+  const api = usePublicApi()
+  const sessionRef = useRef<AuthSession | null>(null)
+  const generation = useRef(0)
+  const pendingRefresh = useRef<Promise<AuthSession> | null>(null)
   const [cacheVersion, setCacheVersion] = useState(0)
+  const {
+    data: session,
+    error,
+    isLoading,
+    mutate,
+  } = useSWR<AuthSession | null, Error>(
+    '/v1/auth/refresh',
+    async () => {
+      const started = generation.current
+
+      try {
+        const next = await readJSON(
+          await api({ path: '/v1/auth/refresh', method: 'POST' }),
+          authResponseSchema,
+        )
+
+        if (started !== generation.current) {
+          return sessionRef.current
+        }
+
+        sessionRef.current = next
+        return next
+      } catch (cause) {
+        if (started !== generation.current) {
+          return sessionRef.current
+        }
+
+        if (cause instanceof ApiError && cause.status === 401) {
+          if (sessionRef.current) {
+            generation.current += 1
+            sessionRef.current = null
+            setCacheVersion((version) => version + 1)
+          }
+
+          return null
+        }
+
+        throw cause
+      }
+    },
+    {
+      errorRetryInterval: 5_000,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      refreshInterval: (current) => {
+        if (!current) {
+          return 0
+        }
+
+        return Math.max(
+          5_000,
+          Date.parse(current.expiresAt) - Date.now() - AUTH_REFRESH_BUFFER_MS,
+        )
+      },
+    },
+  )
 
   const refreshSession = useCallback(async (): Promise<AuthSession> => {
-    try {
-      const next = await parseJson(
-        await fetchApi({ path: '/v1/auth/refresh', method: 'POST' }),
-        authResponseSchema,
-      )
+    if (pendingRefresh.current) {
+      return pendingRefresh.current
+    }
 
-      setSession(next)
-      setError(null)
-      return next
-    } catch (cause) {
-      setError(
-        new Error(
-          cause instanceof Error ? cause.message : 'Could not refresh session',
-          { cause },
-        ),
-      )
-
-      if (cause instanceof ApiError && cause.status === 401) {
-        setSession(null)
-        setCacheVersion((version) => version + 1)
+    const refresh = mutate().then((next) => {
+      if (!next) {
+        throw new Error('Not authenticated')
       }
 
-      throw cause
+      return next
+    })
+    pendingRefresh.current = refresh
+
+    try {
+      return await refresh
+    } finally {
+      pendingRefresh.current = null
     }
-  }, [])
+  }, [mutate])
 
   const getAccessToken = useCallback(
     async (rejectedToken?: string): Promise<string> => {
-      if (!session) {
+      const current = sessionRef.current
+
+      if (!current) {
         throw new Error('Not authenticated')
       }
 
       if (
-        session.accessToken !== rejectedToken &&
-        Date.parse(session.expiresAt) - Date.now() > AUTH_REFRESH_BUFFER_MS
+        current.accessToken !== rejectedToken &&
+        Date.parse(current.expiresAt) - Date.now() > AUTH_REFRESH_BUFFER_MS
       ) {
-        return session.accessToken
+        return current.accessToken
       }
 
       return (await refreshSession()).accessToken
     },
-    [session, refreshSession],
+    [refreshSession],
   )
 
-  const login = useCallback(async (password: string): Promise<void> => {
-    const next = await parseJson(
-      await fetchApi({
-        path: '/v1/auth/login',
-        method: 'POST',
-        body: { password },
-      }),
-      authResponseSchema,
-    )
+  const login = useCallback(
+    async (password: string): Promise<void> => {
+      const next = await readJSON(
+        await api({
+          path: '/v1/auth/login',
+          method: 'POST',
+          body: { password },
+        }),
+        authResponseSchema,
+      )
 
-    setSession(next)
-    setError(null)
-    setCacheVersion((version) => version + 1)
-  }, [])
+      generation.current += 1
+      sessionRef.current = next
+      await mutate(next, { revalidate: false })
+      setCacheVersion((version) => version + 1)
+    },
+    [api, mutate],
+  )
 
   const logout = useCallback(async (): Promise<void> => {
-    await assertOk(await fetchApi({ path: '/v1/auth/logout', method: 'POST' }))
+    await readJSON(
+      await api({ path: '/v1/auth/logout', method: 'POST' }),
+      z.undefined(),
+    )
 
-    setSession(null)
-    setError(null)
+    generation.current += 1
+    sessionRef.current = null
+    await mutate(null, { revalidate: false })
     setCacheVersion((version) => version + 1)
-  }, [])
-
-  useEffect(() => {
-    void refreshSession()
-      .catch(() => {})
-      .finally(() => setIsLoading(false))
-  }, [refreshSession])
-
-  useEffect(() => {
-    if (!session) {
-      return
-    }
-
-    const refreshIfNeeded = () => {
-      void getAccessToken().catch(() => {})
-    }
-    const delay = error
-      ? 5_000
-      : Math.max(
-          5_000,
-          Date.parse(session.expiresAt) - Date.now() - AUTH_REFRESH_BUFFER_MS,
-        )
-    const timer = window.setTimeout(() => {
-      void getAccessToken(session.accessToken).catch(() => {})
-    }, delay)
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        refreshIfNeeded()
-      }
-    }
-
-    window.addEventListener('online', refreshIfNeeded)
-    document.addEventListener('visibilitychange', onVisible)
-
-    return () => {
-      window.clearTimeout(timer)
-      window.removeEventListener('online', refreshIfNeeded)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [session, error, getAccessToken])
+  }, [api, mutate])
 
   return (
     <AuthContext.Provider
       value={{
         isAuthenticated: Boolean(session),
         isLoading,
-        error,
+        error: error ?? null,
         login,
         logout,
         getAccessToken,

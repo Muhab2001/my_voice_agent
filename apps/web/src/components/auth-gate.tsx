@@ -1,9 +1,8 @@
-import { Navigate, Outlet, useLocation } from 'react-router-dom'
-import { useAuth } from '../hooks/use-auth'
+import { Navigate, Outlet } from 'react-router-dom'
+import { useAuth } from '../hooks/auth'
 
 export function AuthGate() {
   const { isAuthenticated, isLoading } = useAuth()
-  const location = useLocation()
   if (isLoading) {
     return (
       <main
@@ -16,7 +15,7 @@ export function AuthGate() {
     )
   }
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />
+    return <Navigate to="/login" replace />
   }
   return <Outlet />
 }

@@ -4,8 +4,8 @@ import type { reservationStateSchema } from '@voice/contracts'
 import type { z } from 'zod'
 import { floatingCardSchema } from '../cards/schema'
 import { renderAuthenticatedHook } from '../test-utils/render-hook'
-import { useFloatingCards } from './use-floating-cards'
-import { useReservation } from './use-reservation'
+import { useFloatingCards } from './floating-cards'
+import { useReservation } from './reservation'
 
 type Reservation = z.infer<typeof reservationStateSchema>
 

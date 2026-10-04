@@ -1,8 +1,8 @@
 import { expect, mock, test } from 'bun:test'
 import { act } from '@testing-library/react/pure'
 import { renderAuthenticatedHook } from '../test-utils/render-hook'
-import type { SessionConnection } from './use-session-manager'
-import { useTranscripts } from './use-transcripts'
+import type { SessionConnection } from './session-manager'
+import { useTranscripts } from './transcripts'
 
 function connectionFixture() {
   const controller = new AbortController()

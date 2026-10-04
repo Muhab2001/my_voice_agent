@@ -2,8 +2,7 @@ import { voiceAnswerSchema, voiceStatusSchema } from '@voice/contracts'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import useSWR from 'swr'
 import { z } from 'zod'
-import { parseJson } from '../lib/http'
-import { useAuthenticatedFetch } from './use-authenticated-fetch'
+import { readJSON, useApi } from './api'
 
 /** Session-owned WebRTC resources. Subscribers detach when the signal aborts. */
 export type SessionConnection = {
@@ -32,7 +31,7 @@ type Status =
 
 /** Owns WebRTC negotiation, connection lifetime, and API session lifecycle. */
 export function useSessionManager() {
-  const request = useAuthenticatedFetch()
+  const api = useApi()
   const current = useRef<Session | null>(null)
   const connection = useRef<SessionConnection | null>(null)
   const controller = useRef<AbortController | null>(null)
@@ -80,7 +79,7 @@ export function useSessionManager() {
   const { data } = useSWR(
     id && status !== 'stopping' ? `/v1/voice/sessions/${id}` : null,
     async (path: `/v1/voice/sessions/${string}`) =>
-      parseJson(await request({ path, method: 'GET' }), voiceStatusSchema),
+      readJSON(await api({ path, method: 'GET' }), voiceStatusSchema),
     {
       refreshInterval: 2000,
       errorRetryCount: 2,
@@ -110,13 +109,16 @@ export function useSessionManager() {
 
   const finalize = useCallback(
     async (sessionId: string, signal: AbortSignal) => {
-      await request({
-        path: `/v1/voice/sessions/${sessionId}/end`,
-        method: 'POST',
-        signal,
-      })
-      return parseJson(
-        await request({
+      await readJSON(
+        await api({
+          path: `/v1/voice/sessions/${sessionId}/end`,
+          method: 'POST',
+          signal,
+        }),
+        z.undefined(),
+      )
+      return readJSON(
+        await api({
           path: `/v1/voice/sessions/${sessionId}`,
           method: 'GET',
           signal,
@@ -124,7 +126,7 @@ export function useSessionManager() {
         voiceStatusSchema,
       )
     },
-    [request],
+    [api],
   )
 
   const end = useCallback((): Promise<void> => {
@@ -331,8 +333,8 @@ export function useSessionManager() {
           throw new Error('The session connection did not produce an offer.')
         }
 
-        const session = await parseJson(
-          await request({
+        const session = await readJSON(
+          await api({
             path: '/v1/voice/sessions',
             method: 'POST',
             body: { sdp },
@@ -388,7 +390,7 @@ export function useSessionManager() {
 
     pending.current = { result, canceled: false }
     return result
-  }, [request, finalize, closeConnection])
+  }, [api, finalize, closeConnection])
 
   useEffect(() => {
     if (status === 'ended' || status === 'failed') {

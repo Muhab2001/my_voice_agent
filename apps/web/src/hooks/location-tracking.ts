@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import useSWR from 'swr'
-import { useAuthenticatedFetch } from './use-authenticated-fetch'
+import { z } from 'zod'
+import { readJSON, useApi } from './api'
 
 function browserPosition(): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
@@ -19,7 +20,7 @@ function browserPosition(): Promise<GeolocationPosition> {
 
 /** Saves a fresh position on demand, then every ten minutes while mounted. */
 export function useLocationTracking() {
-  const send = useAuthenticatedFetch()
+  const api = useApi()
 
   const [permission, setPermission] = useState<PermissionState | 'checking'>(
     'checking',
@@ -33,7 +34,14 @@ export function useLocationTracking() {
         longitude: coords.longitude,
         accuracyMeters: coords.accuracy,
       }
-      await send({ path: '/v1/location', method: 'POST', body: location })
+      await readJSON(
+        await api({
+          path: '/v1/location',
+          method: 'POST',
+          body: location,
+        }),
+        z.undefined(),
+      )
       return location
     },
     {

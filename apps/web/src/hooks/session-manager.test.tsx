@@ -2,7 +2,7 @@ import { expect, spyOn, test } from 'bun:test'
 import { act, waitFor } from '@testing-library/react/pure'
 import { browserFixture, FakePeer } from '../test-utils/audio-browser'
 import { renderAuthenticatedHook } from '../test-utils/render-hook'
-import { useSessionManager } from './use-session-manager'
+import { useSessionManager } from './session-manager'
 
 const id = '00000000-0000-4000-8000-000000000001'
 

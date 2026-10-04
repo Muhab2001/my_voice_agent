@@ -2,8 +2,7 @@ import { reservationStateSchema } from '@voice/contracts'
 import { useEffect, useState } from 'react'
 import useSWRMutation from 'swr/mutation'
 import { z } from 'zod'
-import { ApiError, parseJson } from '../lib/http'
-import { useAuthenticatedFetch } from './use-authenticated-fetch'
+import { ApiError, readJSON, useApi } from './api'
 
 type State = z.infer<typeof reservationStateSchema>
 
@@ -47,7 +46,7 @@ export const confirmationSchema = z.object({
 
 /** Holds one tool-provided reservation and only sends explicit confirmation. */
 export function useReservation(snapshot: State) {
-  const request = useAuthenticatedFetch()
+  const api = useApi()
   const [state, setState] = useState(snapshot)
 
   useEffect(() => {
@@ -70,8 +69,8 @@ export function useReservation(snapshot: State) {
       }
 
       try {
-        const next = await parseJson(
-          await request({
+        const next = await readJSON(
+          await api({
             path: `/v1/reservations/${parsed.data.id}/confirm`,
             method: 'POST',
             body: { revision: parsed.data.revision },

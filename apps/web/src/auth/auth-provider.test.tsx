@@ -1,7 +1,10 @@
 import { expect, spyOn, test } from 'bun:test'
 import { act } from '@testing-library/react/pure'
-import { useAuth } from '../hooks/use-auth'
-import { useAuthenticatedFetch } from '../hooks/use-authenticated-fetch'
+import type { ReactNode } from 'react'
+import { SWRConfig } from 'swr'
+import { z } from 'zod'
+import { readJSON, useApi } from '../hooks/api'
+import { useAuth } from '../hooks/auth'
 import { renderAuthenticatedHook } from '../test-utils/render-hook'
 import { AuthProvider } from './auth-provider'
 
@@ -23,23 +26,42 @@ async function fixture(
     ),
   )
   const timers: { callback: () => void; delay: number }[] = []
-  let restoreTimeout!: () => void
+  const originalTimeout = globalThis.setTimeout
+  const timeout = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    delay?: number,
+    ...args: unknown[]
+  ) => {
+    if (delay && delay >= 5_000) {
+      timers.push({ callback, delay })
+      return timers.length as unknown as ReturnType<typeof setTimeout>
+    }
+
+    return originalTimeout(callback, delay, ...args)
+  }) as typeof setTimeout)
+  const cache = new Map()
+  function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <SWRConfig
+        value={{
+          provider: () => cache,
+          dedupingInterval: 0,
+          focusThrottleInterval: 0,
+          isVisible: () => true,
+          isOnline: () => true,
+          refreshWhenHidden: true,
+          refreshWhenOffline: true,
+        }}
+      >
+        <AuthProvider>{children}</AuthProvider>
+      </SWRConfig>
+    )
+  }
   const app = await renderAuthenticatedHook(
-    () => ({ auth: useAuth(), send: useAuthenticatedFetch() }),
+    () => ({ auth: useAuth(), send: useApi() }),
     undefined,
     {
-      wrapper: AuthProvider,
-      setup: (browser) => {
-        const timeout = spyOn(browser, 'setTimeout').mockImplementation(
-          (callback, delay) => {
-            timers.push({ callback: callback as () => void, delay: delay ?? 0 })
-            return timers.length as unknown as ReturnType<
-              typeof browser.setTimeout
-            >
-          },
-        )
-        restoreTimeout = () => timeout.mockRestore()
-      },
+      wrapper: Wrapper,
     },
   )
 
@@ -55,7 +77,7 @@ async function fixture(
     async cleanup() {
       await app.cleanup()
       request.mockRestore()
-      restoreTimeout()
+      timeout.mockRestore()
     },
   }
 }
@@ -97,18 +119,42 @@ test('near-expiry tokens refresh and React exposes the updated callback', async 
   }
 })
 
-test('passive refresh publishes a new token and reschedules the timer', async () => {
-  let calls = 0
-  const app = await fixture(async () =>
-    Response.json(session(++calls === 1 ? 'old' : 'new')),
-  )
+test('a late refresh cannot restore the session after logout', async () => {
+  let completeRefresh!: (response: Response) => void
+  let refreshes = 0
+  const app = await fixture(async (path) => {
+    if (path.endsWith('/logout')) {
+      return new Response(null, { status: 204 })
+    }
+
+    if (++refreshes === 1) {
+      return Response.json(session('old'))
+    }
+
+    return new Promise((resolve) => {
+      completeRefresh = resolve
+    })
+  })
 
   try {
+    let pending!: Promise<string>
+
     await act(async () => {
-      app.timers.at(-1)?.callback()
+      pending = app.auth.getAccessToken('old')
+      await Bun.sleep(0)
     })
-    expect(await app.auth.getAccessToken()).toBe('new')
-    expect(app.timers).toHaveLength(2)
+
+    await act(async () => {
+      await app.auth.logout()
+    })
+
+    await act(async () => {
+      completeRefresh(Response.json(session('late')))
+      await pending.catch(() => {})
+    })
+
+    expect(app.auth.isAuthenticated).toBe(false)
+    await expect(app.auth.getAccessToken()).rejects.toThrow('Not authenticated')
   } finally {
     await app.cleanup()
   }
@@ -160,10 +206,10 @@ test('refresh network failures preserve the session and retry; a 401 signs out',
     })
     expect(app.auth.isAuthenticated).toBe(true)
     expect(app.auth.error?.message).toBe('Offline')
-    expect(app.timers.at(-1)?.delay).toBe(5_000)
     mode = 'unauthorized'
     await act(async () => {
-      app.timers.at(-1)?.callback()
+      await app.auth.getAccessToken().catch(() => {})
+      await Bun.sleep(5)
     })
     expect(app.auth.isAuthenticated).toBe(false)
   } finally {
@@ -186,7 +232,10 @@ test('authenticated hook retries a rejected token and updates provider state', a
 
   try {
     await act(async () => {
-      await app.send({ path: '/test', method: 'GET' })
+      await readJSON(
+        await app.send({ path: '/test', method: 'GET' }),
+        z.object({ ok: z.boolean() }),
+      )
     })
     expect(refreshes).toBe(2)
     expect(requests).toBe(2)

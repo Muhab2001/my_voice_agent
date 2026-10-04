@@ -9,7 +9,7 @@ import { z } from 'zod'
 
 const messageSchema = z.object({ message: z.string() })
 
-export const suggestionsCardSchema = z.discriminatedUnion('kind', [
+const suggestionsCardSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('hotels'),
     options: z.union([z.array(hotelOptionSchema), messageSchema]),

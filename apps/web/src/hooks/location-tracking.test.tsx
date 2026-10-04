@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test'
 import { act } from '@testing-library/react/pure'
 import { renderAuthenticatedHook } from '../test-utils/render-hook'
-import { useLocationTracking } from './use-location-tracking'
+import { useLocationTracking } from './location-tracking'
 
 async function fixture(permission: PermissionState = 'prompt') {
   let denied = false

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { type FloatingCardData, floatingCardSchema } from '../cards/schema'
-import type { UIEvent } from '../ui-events/ui-event-stream'
+import type { UIEvent } from './ui-event-stream'
 
 /** Owns the cards shown by tool events and removes them by identity on dismissal. */
 export function useFloatingCards() {

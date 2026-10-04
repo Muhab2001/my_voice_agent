@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { SessionConnection } from './use-session-manager'
+import type { SessionConnection } from './session-manager'
 
 type AudioResources = {
   muted: boolean

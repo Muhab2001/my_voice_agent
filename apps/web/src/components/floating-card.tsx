@@ -16,7 +16,7 @@ export function FloatingCard({
 }) {
   return (
     <aside
-      className="w-full animate-in fade-in-0 slide-in-from-bottom-2 rounded-2xl border border-[#e1e6ef] bg-white/95 p-4 shadow-[0_16px_50px_rgba(37,51,73,0.16)] duration-300 backdrop-blur-sm"
+      className="w-full animate-in fade-in-0 slide-in-from-bottom-2 rounded-2xl border border-[#dce2eb] bg-white p-4 duration-300"
       aria-label={title}
     >
       <div className="mb-3 flex items-start gap-3">

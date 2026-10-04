@@ -1,16 +1,15 @@
 import { ArrowRight, Eye, EyeOff, LockKeyhole } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { Brand } from '../components/brand'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
-import { useAuth } from '../hooks/use-auth'
+import { useAuth } from '../hooks/auth'
 
 export function LoginPage() {
   const { isAuthenticated, login } = useAuth()
   const navigate = useNavigate()
-  const location = useLocation()
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [pending, setPending] = useState(false)
@@ -29,9 +28,7 @@ export function LoginPage() {
     setError(null)
     try {
       await login(password)
-      navigate((location.state as { from?: string } | null)?.from ?? '/', {
-        replace: true,
-      })
+      navigate('/', { replace: true })
     } catch (cause) {
       setError(
         cause instanceof Error && cause.message !== 'Invalid credentials'

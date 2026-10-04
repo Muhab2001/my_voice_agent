@@ -1,4 +1,4 @@
-import type { TranscriptItem } from '../hooks/use-transcripts'
+import type { TranscriptItem } from '../hooks/transcripts'
 
 export function LiveCaptions({ items }: { items: TranscriptItem[] }) {
   return (

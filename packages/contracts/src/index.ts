@@ -17,32 +17,9 @@ export const authResponseSchema = z
   })
   .openapi('AuthResponse')
 
-export const loginSchema = z
-  .object({
-    password: z.string().min(1).max(1024),
-  })
-  .openapi('LoginRequest')
-
-export const healthSchema = z
-  .object({
-    status: z.enum(['ok', 'unavailable']),
-  })
-  .openapi('HealthResponse')
-
-export const readinessSchema = z
-  .object({
-    status: z.enum(['ok', 'unavailable']),
-    resources: z.record(z.string()),
-  })
-  .openapi('ReadinessResponse')
-
-export const voiceOfferSchema = z
-  .object({ sdp: z.string().min(1).max(100_000) })
-  .openapi('VoiceOffer')
 export const voiceAnswerSchema = z
   .object({ id: z.string().uuid(), sdp: z.string() })
   .openapi('VoiceAnswer')
-export const voiceIdSchema = z.object({ id: z.string().uuid() })
 export const voiceStatusSchema = z
   .object({
     id: z.string().uuid(),
@@ -51,24 +28,6 @@ export const voiceStatusSchema = z
     finalization: z.string().nullable(),
   })
   .openapi('VoiceStatus')
-export const transcriptSnapshotSchema = z.object({
-  id: z.string().uuid(),
-  sessionId: z.string().uuid(),
-  role: z.enum(['user', 'assistant']),
-  text: z.string(),
-  startMs: z.number().int(),
-  endMs: z.number().int(),
-  createdAt: z.string().datetime(),
-})
-export const transcriptResponseSchema = z
-  .object({ snapshots: z.array(transcriptSnapshotSchema) })
-  .openapi('Transcripts')
-
-export const locationInputSchema = z.object({
-  latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180),
-  accuracyMeters: z.number().min(0).max(100_000),
-})
 export const placeCategorySchema = z.enum([
   'cafe',
   'restaurant',
@@ -113,37 +72,6 @@ export const voiceUiEventSchema = z.discriminatedUnion('type', [
   }),
 ])
 
-export const reservationRoomInputSchema = z
-  .object({
-    offeringId: z.string().uuid(),
-    quantity: z.number().int().min(1).max(100),
-  })
-  .strict()
-export const reservationPatchSchema = z
-  .object({
-    revision: z.number().int().positive(),
-    hotelId: z.string().uuid().nullable().optional(),
-    stayDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .nullable()
-      .optional(),
-    guestName: z.string().trim().min(1).max(128).nullable().optional(),
-    rooms: z.array(reservationRoomInputSchema).max(20).optional(),
-  })
-  .strict()
-export const reservationCreateSchema = reservationPatchSchema.omit({
-  revision: true,
-})
-export const reservationActionSchema = z
-  .object({ revision: z.number().int().positive() })
-  .strict()
-export const reservationFilterSchema = z.object({
-  upcoming: z.enum(['true', 'false']).optional(),
-  city: z.string().trim().min(1).max(128).optional(),
-  brand: z.string().trim().min(1).max(128).optional(),
-  status: z.enum(['draft', 'abandoned', 'confirmed']).optional(),
-})
 export const reservationStateSchema = z.object({
   id: z.string().uuid(),
   status: z.enum(['draft', 'abandoned', 'confirmed']),

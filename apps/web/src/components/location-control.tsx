@@ -1,6 +1,6 @@
 import { MapPin } from 'lucide-react'
 import { Dialog } from 'radix-ui'
-import type { useLocationTracking } from '../hooks/use-location-tracking'
+import type { useLocationTracking } from '../hooks/location-tracking'
 import { Button } from './ui/button'
 
 type LocationState = ReturnType<typeof useLocationTracking>

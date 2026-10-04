@@ -1,6 +1,6 @@
 import { Check, ClipboardList } from 'lucide-react'
 import type { FloatingCardData } from '../cards/schema'
-import { useReservation } from '../hooks/use-reservation'
+import { useReservation } from '../hooks/reservation'
 import { FloatingCard } from './floating-card'
 import { Button } from './ui/button'
 

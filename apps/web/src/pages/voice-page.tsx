@@ -12,14 +12,14 @@ import {
   TooltipTrigger,
 } from '../components/ui/tooltip'
 import { VoiceOrb } from '../components/voice-orb'
-import { useAudioManager } from '../hooks/use-audio-manager'
-import { useAuth } from '../hooks/use-auth'
-import { useFloatingCards } from '../hooks/use-floating-cards'
-import { useLocationTracking } from '../hooks/use-location-tracking'
-import type { SessionConnection } from '../hooks/use-session-manager'
-import { useSessionManager } from '../hooks/use-session-manager'
-import { useTranscripts } from '../hooks/use-transcripts'
-import { useUIEventStream } from '../hooks/use-ui-event-stream'
+import { useAudioManager } from '../hooks/audio-manager'
+import { useAuth } from '../hooks/auth'
+import { useFloatingCards } from '../hooks/floating-cards'
+import { useLocationTracking } from '../hooks/location-tracking'
+import type { SessionConnection } from '../hooks/session-manager'
+import { useSessionManager } from '../hooks/session-manager'
+import { useTranscripts } from '../hooks/transcripts'
+import { useUIEventStream } from '../hooks/ui-event-stream'
 
 export function VoicePage() {
   const { logout } = useAuth()
