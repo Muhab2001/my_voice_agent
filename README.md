@@ -36,10 +36,10 @@ Use Docker Compose (or Bun 1.3.11 for local processes). Copy `.env.example` to `
 
 ```sh
 cp .env.example .env
-docker compose --env-file .env -f infra/local/docker-compose.yaml up --build
+bun run docker:up
 ```
 
-Compose starts PostgreSQL, runs migrations and the hotel seed, then starts the API and UI. Open [localhost:5173](http://localhost:5173); the API is at [localhost:3000](http://localhost:3000), with Swagger at [localhost:3000/docs](http://localhost:3000/docs). Use `docker compose --env-file .env -f infra/local/docker-compose.yaml down` to stop; the database volume remains. Health checks are `/health/live` and `/health/ready`.
+`bun run docker:up` starts the existing Compose stack. After changing API code, dependencies, or Docker configuration, use `bun run docker:up:fresh` to rebuild images and recreate containers from the current source. The named PostgreSQL volume is preserved. Compose starts PostgreSQL, runs migrations and the hotel seed, then starts the API and UI. Open [localhost:5173](http://localhost:5173); the API is at [localhost:3000](http://localhost:3000), with Swagger at [localhost:3000/docs](http://localhost:3000/docs). Use `docker compose --env-file .env -f infra/local/docker-compose.yaml down` to stop; the database volume remains. Health checks are `/health/live` and `/health/ready`.
 
 For local processes instead of Compose, start PostgreSQL, set `DATABASE_URL` in `.env`, then run `bun install --frozen-lockfile --linker hoisted`, `set -a; . ./.env; set +a`, and `bun run migrate`. Run `bun run --cwd apps/api dev` and `bun run --cwd apps/web dev` in separate terminals with the environment loaded. Use `bun run lint`, `bun run typecheck`, `bun run test`, and `bun run build` to check changes. Database integration tests need an isolated `RESERVATION_TEST_DATABASE_URL` or `TEST_DATABASE_URL` as appropriate.
 

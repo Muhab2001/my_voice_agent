@@ -12,6 +12,8 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "migrate": "bun run --cwd apps/scripts migrate",
+    "docker:up": "docker compose --env-file .env -f infra/local/docker-compose.yaml up -d",
+    "docker:up:fresh": "docker compose --env-file .env -f infra/local/docker-compose.yaml up -d --build --force-recreate",
     "lint": "biome check .",
     "format": "biome format --write .",
     "format:check": "biome format ."
