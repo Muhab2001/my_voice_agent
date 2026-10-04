@@ -239,3 +239,151 @@ test('microphone meter samples input, respects mute, and stops on end', async ()
     await cleanup()
   }
 })
+
+test('audio hook sends a buffered track, activates it on connection, and releases it on stop', async () => {
+  const { app, fixture, peer, connection, cleanup } = await setup()
+  const previousContext = Object.getOwnPropertyDescriptor(
+    globalThis,
+    'AudioContext',
+  )
+  const previousWorklet = Object.getOwnPropertyDescriptor(
+    globalThis,
+    'AudioWorkletNode',
+  )
+  const messages: unknown[] = []
+  const outgoingTrack = {
+    enabled: true,
+    stopped: false,
+    stop() {
+      this.stopped = true
+    },
+  }
+  const outgoing = {
+    getTracks: () => [outgoingTrack],
+    getAudioTracks: () => [outgoingTrack],
+  }
+  let closed = false
+  Object.defineProperty(globalThis, 'AudioContext', {
+    configurable: true,
+    value: class {
+      audioWorklet = {
+        addModule: async (url: string) => {
+          expect(url).toContain('audio-buffer-processor')
+        },
+      }
+      createMediaStreamSource() {
+        return { connect: (node: unknown) => node }
+      }
+      createMediaStreamDestination() {
+        return { stream: outgoing }
+      }
+      createAnalyser() {
+        return {
+          fftSize: 256,
+          getByteTimeDomainData: (samples: Uint8Array) => samples.fill(128),
+        }
+      }
+      async resume() {}
+      async close() {
+        closed = true
+      }
+    },
+  })
+  Object.defineProperty(globalThis, 'AudioWorkletNode', {
+    configurable: true,
+    value: class {
+      port = { postMessage: (message: unknown) => messages.push(message) }
+      connect(node: unknown) {
+        return node
+      }
+    },
+  })
+
+  try {
+    await act(async () => app.result.current.start(connection))
+    expect(peer.addedTracks[0]?.track).toBe(outgoingTrack)
+    expect(peer.addedTracks[0]?.stream).toBe(outgoing)
+    expect(messages).toEqual([])
+
+    await act(async () => app.result.current.activate())
+    expect(messages).toEqual([{ type: 'activate' }])
+
+    await act(async () => app.result.current.toggleMute())
+    expect(fixture.track.enabled).toBe(false)
+    expect(outgoingTrack.enabled).toBe(false)
+    expect(messages.at(-1)).toEqual({ type: 'mute', muted: true })
+
+    await act(async () => app.result.current.end())
+    expect(fixture.track.stopped).toBe(true)
+    expect(outgoingTrack.stopped).toBe(true)
+    expect(closed).toBe(true)
+  } finally {
+    if (previousContext) {
+      Object.defineProperty(globalThis, 'AudioContext', previousContext)
+    } else {
+      Reflect.deleteProperty(globalThis, 'AudioContext')
+    }
+
+    if (previousWorklet) {
+      Object.defineProperty(globalThis, 'AudioWorkletNode', previousWorklet)
+    } else {
+      Reflect.deleteProperty(globalThis, 'AudioWorkletNode')
+    }
+
+    await cleanup()
+  }
+})
+
+test('stopping while the audio worklet loads discards the captured microphone', async () => {
+  const { app, fixture, peer, connection, cleanup } = await setup()
+  const previousContext = Object.getOwnPropertyDescriptor(
+    globalThis,
+    'AudioContext',
+  )
+  let finishModule!: () => void
+  let closed = false
+  Object.defineProperty(globalThis, 'AudioContext', {
+    configurable: true,
+    value: class {
+      audioWorklet = {
+        addModule: () =>
+          new Promise<void>((resolve) => {
+            finishModule = resolve
+          }),
+      }
+      createMediaStreamSource() {
+        return { connect() {} }
+      }
+      async resume() {}
+      async close() {
+        closed = true
+      }
+    },
+  })
+
+  try {
+    let pending!: Promise<void>
+
+    await act(async () => {
+      pending = app.result.current.start(connection)
+      await Bun.sleep(0)
+    })
+    expect(finishModule).toBeDefined()
+
+    await act(async () => app.result.current.end())
+    finishModule()
+    await act(async () => pending)
+
+    expect(fixture.track.stopped).toBe(true)
+    expect(peer.addedTracks).toHaveLength(0)
+    expect(closed).toBe(true)
+  } finally {
+    if (previousContext) {
+      Object.defineProperty(globalThis, 'AudioContext', previousContext)
+    } else {
+      Reflect.deleteProperty(globalThis, 'AudioContext')
+    }
+
+    await cleanup()
+  }
+})

@@ -53,6 +53,12 @@ export function VoicePage() {
     }
   }, [session.status, stopSession])
 
+  useEffect(() => {
+    if (session.status === 'connected') {
+      audio.activate()
+    }
+  }, [session.status, audio.activate])
+
   async function startSession() {
     let connection: SessionConnection | null = null
 
@@ -145,6 +151,7 @@ export function VoicePage() {
             </div>
             <VoiceOrb
               connected={session.status === 'connected'}
+              listening={active}
               muted={audio.muted}
               audioPlaying={audio.audioPlaying}
               audioReady={audio.audioReady}

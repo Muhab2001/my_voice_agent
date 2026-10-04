@@ -11,6 +11,7 @@ const barFrames = [
 
 type Props = {
   connected: boolean
+  listening: boolean
   muted: boolean
   audioPlaying: boolean
   audioReady: boolean
@@ -20,6 +21,7 @@ type Props = {
 
 export function VoiceOrb({
   connected,
+  listening,
   muted,
   audioPlaying,
   audioReady,
@@ -27,24 +29,26 @@ export function VoiceOrb({
   onReplay,
 }: Props) {
   const speakingStrength =
-    connected && !muted
+    listening && !muted
       ? Math.min(1, Math.max(0, (inputLevel - 0.02) * 3.2))
       : 0
   const [speakingVisible, setSpeakingVisible] = useState(false)
   const [barFrame, setBarFrame] = useState(0)
 
   useEffect(() => {
-    if (!connected || muted || audioPlaying) {
+    if (!listening || muted) {
       setSpeakingVisible(false)
       return
     }
+
     if (speakingStrength > 0.1) {
       setSpeakingVisible(true)
       return
     }
+
     const timer = window.setTimeout(() => setSpeakingVisible(false), 350)
     return () => window.clearTimeout(timer)
-  }, [connected, muted, audioPlaying, speakingStrength])
+  }, [listening, muted, speakingStrength])
 
   useEffect(() => {
     if (!audioPlaying && !speakingVisible) {
@@ -58,18 +62,22 @@ export function VoiceOrb({
     return () => window.clearInterval(timer)
   }, [audioPlaying, speakingVisible])
 
-  const speakingOpacity = audioPlaying || !speakingVisible ? 0 : 1
-  const receivingOpacity = audioPlaying ? 1 : 0
-  const tint = audioPlaying
-    ? 'receiving'
-    : speakingVisible
-      ? 'speaking'
+  const speakingOpacity = speakingVisible ? 1 : 0
+  const receivingOpacity = audioPlaying && !speakingVisible ? 1 : 0
+  const tint = speakingVisible
+    ? 'speaking'
+    : audioPlaying
+      ? 'receiving'
       : 'resting'
-  const scale = audioPlaying ? 1.035 : 1 + speakingStrength * 0.055
-  const motionStrength = audioPlaying
-    ? 1
-    : speakingVisible
-      ? Math.max(0.45, speakingStrength)
+  const scale = speakingVisible
+    ? 1 + speakingStrength * 0.055
+    : audioPlaying
+      ? 1.035
+      : 1
+  const motionStrength = speakingVisible
+    ? Math.max(0.45, speakingStrength)
+    : audioPlaying
+      ? 1
       : 0
 
   return (

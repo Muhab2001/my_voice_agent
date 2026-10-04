@@ -40,13 +40,16 @@ export class FakePeer extends EventTarget {
   localDescription: RTCSessionDescriptionInit | null = null
   remoteAnswer: string | undefined
   closed = false
+  addedTracks: { track: unknown; stream: unknown }[] = []
 
   constructor() {
     super()
     FakePeer.current = this
   }
 
-  addTrack() {}
+  addTrack(track: unknown, stream: unknown) {
+    this.addedTracks.push({ track, stream })
+  }
 
   createDataChannel() {
     return this.channel

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import audioBufferProcessorUrl from './audio-buffer-processor.ts?worker&url'
 import type { SessionConnection } from './session-manager'
 
 type AudioResources = {
@@ -7,6 +8,8 @@ type AudioResources = {
   audio: HTMLAudioElement
   stream?: MediaStream
   context?: AudioContext
+  processor?: AudioWorkletNode
+  outgoing?: MediaStream
   frame?: number
 }
 
@@ -79,6 +82,9 @@ export function useAudioManager() {
           current.stream?.getTracks().forEach((track) => {
             track.stop()
           })
+          current.outgoing?.getTracks().forEach((track) => {
+            track.stop()
+          })
           audio.pause()
           audio.srcObject = null
         },
@@ -90,6 +96,13 @@ export function useAudioManager() {
           throw new Error(
             'Microphone access is unavailable. Use HTTPS or localhost.',
           )
+        }
+
+        try {
+          current.context = new AudioContext()
+          void current.context.resume().catch(() => {})
+        } catch {
+          // Browsers without Web Audio can still send the microphone directly.
         }
 
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -106,17 +119,63 @@ export function useAudioManager() {
 
         current.stream = stream
 
-        for (const track of stream.getAudioTracks()) {
+        let outgoing = stream
+        let source: MediaStreamAudioSourceNode | undefined
+
+        if (current.context) {
+          try {
+            source = current.context.createMediaStreamSource(stream)
+
+            if (current.context.audioWorklet) {
+              await current.context.audioWorklet.addModule(
+                audioBufferProcessorUrl,
+              )
+
+              if (signal.aborted) {
+                return
+              }
+
+              const processor = new AudioWorkletNode(
+                current.context,
+                'startup-audio-buffer',
+                { outputChannelCount: [1] },
+              )
+              const destination = current.context.createMediaStreamDestination()
+              source.connect(processor).connect(destination)
+              current.processor = processor
+              current.outgoing = destination.stream
+              outgoing = destination.stream
+            }
+          } catch {
+            current.outgoing?.getTracks().forEach((track) => {
+              track.stop()
+            })
+            current.outgoing = undefined
+            current.processor = undefined
+            outgoing = stream
+          }
+        }
+
+        if (signal.aborted) {
+          return
+        }
+
+        for (const track of outgoing.getAudioTracks()) {
           track.enabled = !current.muted
-          connection.peer.addTrack(track, stream)
+          connection.peer.addTrack(track, outgoing)
         }
 
         try {
-          const context = new AudioContext()
-          current.context = context
+          const context = current.context
+
+          if (!context) {
+            throw new Error('Audio meter unavailable')
+          }
+
           const analyser = context.createAnalyser()
           analyser.fftSize = 256
-          context.createMediaStreamSource(stream).connect(analyser)
+          const meterSource = source ?? context.createMediaStreamSource(stream)
+          meterSource.connect(analyser)
           const samples = new Uint8Array(analyser.fftSize)
           let lastUpdate = 0
           const tick = (now: number) => {
@@ -175,6 +234,13 @@ export function useAudioManager() {
       resources.current?.stream?.getAudioTracks().forEach((track) => {
         track.enabled = value
       })
+      resources.current?.outgoing?.getAudioTracks().forEach((track) => {
+        track.enabled = value
+      })
+      resources.current?.processor?.port.postMessage({
+        type: 'mute',
+        muted: !value,
+      })
 
       if (!value) {
         setInputLevel(0)
@@ -182,6 +248,17 @@ export function useAudioManager() {
 
       return !value
     })
+  }, [])
+
+  const activate = useCallback(() => {
+    const current = resources.current
+
+    if (!current || current.controller.signal.aborted) {
+      return
+    }
+
+    current.processor?.port.postMessage({ type: 'activate' })
+    void current.context?.resume().catch(() => {})
   }, [])
 
   const replayAudio = useCallback(async () => {
@@ -211,6 +288,7 @@ export function useAudioManager() {
     inputLevel,
     error,
     start,
+    activate,
     end,
     toggleMute,
     replayAudio,

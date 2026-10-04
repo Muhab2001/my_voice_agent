@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test --preload ./src/test-utils/worklet-url.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
