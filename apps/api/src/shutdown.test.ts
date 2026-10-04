@@ -133,3 +133,46 @@ test('SIGTERM closes SSE after pending tools and provider finalization', async (
     }
   }
 }, 4000)
+
+test('SIGTERM reaches the hard deadline when resource cleanup stalls', async () => {
+  const child = spawn(process.execPath, ['src/testing/shutdown-fixture.ts'], {
+    cwd: new URL('..', import.meta.url).pathname,
+    env: { ...process.env, PORT: '0', STALL_RESOURCE: 'true' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  const exited = once(child, 'exit')
+  let output = ''
+  child.stdout.on('data', (chunk) => {
+    output += String(chunk)
+  })
+  child.stderr.on('data', (chunk) => {
+    output += String(chunk)
+  })
+  const deadline = setTimeout(() => child.kill('SIGKILL'), 15_000)
+
+  try {
+    while (!output.includes('API listening')) {
+      if (child.exitCode !== null) {
+        throw new Error(`API exited: ${output}`)
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+
+    child.kill('SIGTERM')
+    const [code, signal] = (await exited) as [
+      number | null,
+      NodeJS.Signals | null,
+    ]
+    expect(code).toBe(1)
+    expect(signal).toBeNull()
+    expect(output).toContain('Shutdown drain deadline reached')
+    expect(output).toContain('Shutdown deadline reached')
+  } finally {
+    clearTimeout(deadline)
+
+    if (child.exitCode === null) {
+      child.kill('SIGKILL')
+    }
+  }
+}, 16_000)

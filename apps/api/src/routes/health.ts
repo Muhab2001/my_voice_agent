@@ -1,43 +1,62 @@
-import { createRoute, type RouteHandler } from '@hono/zod-openapi'
-import { healthSchema, readinessSchema } from '@voice/contracts'
 import type { RemoteResource } from '@voice/resource-manager'
-import type { ApiEnv } from '../app.js'
+import { z } from 'zod'
 import { jsonResponse } from '../http/responses.js'
+import { route } from '../http/route.js'
 
-export const liveRoute = createRoute({
-  method: 'get',
-  path: '/health/live',
-  responses: { 200: jsonResponse(healthSchema) },
-})
-
-export const readyRoute = createRoute({
-  method: 'get',
-  path: '/health/ready',
-  responses: {
-    200: jsonResponse(readinessSchema),
-    503: jsonResponse(readinessSchema),
+// Reports whether the API process is running.
+export const liveRoute = route(
+  {
+    method: 'get',
+    path: '/health/live',
+    responses: {
+      200: jsonResponse(
+        z
+          .object({ status: z.enum(['ok', 'unavailable']) })
+          .openapi('HealthResponse'),
+      ),
+    },
   },
-})
+  (c) => c.json({ status: 'ok' as const }, 200),
+)
 
-export const liveHandler: RouteHandler<typeof liveRoute, ApiEnv> = (c) =>
-  c.json({ status: 'ok' as const }, 200)
+// Reports whether dependencies are healthy and the API accepts new work.
+export const readyRoute = (
+  resources: RemoteResource<Record<string, string>>,
+  isShuttingDown: () => boolean,
+) => {
+  const response = jsonResponse(
+    z
+      .object({
+        status: z.enum(['ok', 'unavailable']),
+        resources: z.record(z.string()),
+      })
+      .openapi('ReadinessResponse'),
+  )
 
-export const readyHandler =
-  (
-    resources: RemoteResource<Record<string, string>>,
-    isShuttingDown: () => boolean,
-  ): RouteHandler<typeof readyRoute, ApiEnv> =>
-  async (c) => {
-    if (isShuttingDown()) {
-      return c.json({ status: 'unavailable' as const, resources: {} }, 503)
-    }
+  return route(
+    {
+      method: 'get',
+      path: '/health/ready',
+      responses: {
+        200: response,
+        503: response,
+      },
+    },
+    async (c) => {
+      if (isShuttingDown()) {
+        return c.json({ status: 'unavailable' as const, resources: {} }, 503)
+      }
 
-    const report = await resources.ping()
-    if (!report.healthy) {
-      return c.json(
-        { status: 'unavailable' as const, resources: report.details },
-        503,
-      )
-    }
-    return c.json({ status: 'ok' as const, resources: report.details }, 200)
-  }
+      const report = await resources.ping()
+
+      if (!report.healthy) {
+        return c.json(
+          { status: 'unavailable' as const, resources: report.details },
+          503,
+        )
+      }
+
+      return c.json({ status: 'ok' as const, resources: report.details }, 200)
+    },
+  )
+}

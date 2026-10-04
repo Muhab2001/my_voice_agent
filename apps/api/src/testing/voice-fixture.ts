@@ -1,20 +1,20 @@
 import type {
   Coordinates,
   HotelOption,
-  LocationService,
+  LocationStore,
   Memory,
   MemoryInput,
   MemoryQuery,
-  MemoryService,
+  MemoryStore,
   OfferingOption,
   ReservationPatch,
-  ReservationService,
   ReservationState,
+  ReservationStore,
   SavedLocation,
   SessionUpdate,
   Snapshot,
-  TranscriptService,
-  VoiceSessionService,
+  TranscriptStore,
+  VoiceSessionStore,
 } from '@voice/database'
 import type { PlacesService } from '../voice/places.js'
 import type { SidebandSocket, VoiceChatProvider } from '../voice/provider.js'
@@ -80,10 +80,10 @@ export class TestSocket extends EventTarget implements SidebandSocket {
 }
 
 /** In-memory local session records for lifecycle tests. */
-export class TestVoiceSessionService implements VoiceSessionService {
+export class TestVoiceSessionService implements VoiceSessionStore {
   rows = new Map<
     string,
-    NonNullable<Awaited<ReturnType<VoiceSessionService['get']>>>
+    NonNullable<Awaited<ReturnType<VoiceSessionStore['get']>>>
   >()
 
   async create() {
@@ -114,7 +114,7 @@ export class TestVoiceSessionService implements VoiceSessionService {
 }
 
 /** In-memory idempotent transcript persistence for flush tests. */
-export class TestTranscriptService implements TranscriptService {
+export class TestTranscriptService implements TranscriptStore {
   chunks = new Map<string, Snapshot>()
 
   async append(chunks: Snapshot[]) {
@@ -134,7 +134,7 @@ export class TestTranscriptService implements TranscriptService {
 }
 
 /** In-memory memory operations with a controllable write delay. */
-export class TestMemoryService implements MemoryService {
+export class TestMemoryService implements MemoryStore {
   facts: Memory[] = []
   writes = 0
   beforeWrite: (() => Promise<void>) | undefined
@@ -190,7 +190,7 @@ export class TestVoiceChatProvider implements VoiceChatProvider {
   }
 }
 
-export class TestLocationService implements LocationService {
+export class TestLocationService implements LocationStore {
   position: SavedLocation | null = null
 
   async save(input: Coordinates) {
@@ -210,7 +210,7 @@ export class TestPlacesService implements PlacesService {
 }
 
 /** Explicit reservation dependency for voice tests that do not exercise booking. */
-export class TestReservationService implements ReservationService {
+export class TestReservationService implements ReservationStore {
   rows = new Map<string, ReservationState>()
   abandoned: string[] = []
   hotelOptions: HotelOption[] = []

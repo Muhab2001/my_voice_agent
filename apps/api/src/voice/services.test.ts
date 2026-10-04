@@ -1,12 +1,9 @@
 import { expect, test } from 'bun:test'
-import {
-  DrizzleMemoryService,
-  DrizzleTranscriptService,
-  DrizzleVoiceSessionService,
-  memoryFingerprint,
-  newDrizzleDatabase,
-} from '@voice/database'
+import { memoryFingerprint, newDrizzleDatabase } from '@voice/database'
 import { runMigrations } from '@voice/database/migrate'
+import { MemoryService } from '../services/memory-service.js'
+import { TranscriptService } from '../services/transcript-service.js'
+import { VoiceSessionService } from '../services/voice-session-service.js'
 
 const url = process.env.TEST_DATABASE_URL
 // Opt in against a disposable database: migrations are applied, existing data is retained.
@@ -19,9 +16,9 @@ test.skipIf(!url)(
     await runMigrations(url)
     const database = newDrizzleDatabase({ url })
     try {
-      const memory = new DrizzleMemoryService(database.client)
-      const transcripts = new DrizzleTranscriptService(database.client)
-      const sessions = new DrizzleVoiceSessionService(database.client)
+      const memory = new MemoryService(database.client)
+      const transcripts = new TranscriptService(database.client)
+      const sessions = new VoiceSessionService(database.client)
       const session = await sessions.create()
       const tag = crypto.randomUUID()
       const original = {

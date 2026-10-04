@@ -57,3 +57,59 @@ test('resource manager reports every failure without propagating a ping error', 
     },
   })
 })
+
+test('resource manager drains dependents before closing their dependencies', async () => {
+  const calls: string[] = []
+  let finishVoice!: () => void
+  const voiceClosed = new Promise<void>((resolve) => {
+    finishVoice = resolve
+  })
+  const manager = new ResourceManager({
+    database: {
+      ping: async () => ({ healthy: true, details: 'ready' }),
+      close: async () => {
+        calls.push('database')
+      },
+    },
+    voice: {
+      ping: async () => ({ healthy: true, details: 'ready' }),
+      close: async () => {
+        calls.push('voice:start')
+        await voiceClosed
+        calls.push('voice:end')
+      },
+    },
+  })
+
+  const closing = manager.close()
+  await Promise.resolve()
+  expect(calls).toEqual(['voice:start'])
+
+  finishVoice()
+  await closing
+  expect(calls).toEqual(['voice:start', 'voice:end', 'database'])
+})
+
+test('resource manager still closes dependencies after a dependent fails', async () => {
+  const calls: string[] = []
+  const manager = new ResourceManager({
+    database: {
+      ping: async () => ({ healthy: true, details: 'ready' }),
+      close: async () => {
+        calls.push('database')
+      },
+    },
+    voice: {
+      ping: async () => ({ healthy: true, details: 'ready' }),
+      close: async () => {
+        calls.push('voice')
+        throw new Error('Voice cleanup failed')
+      },
+    },
+  })
+
+  await expect(manager.close()).rejects.toThrow(
+    'Failed to close remote resources',
+  )
+  expect(calls).toEqual(['voice', 'database'])
+})

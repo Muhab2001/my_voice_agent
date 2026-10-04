@@ -1,47 +1,26 @@
 import { swaggerUI } from '@hono/swagger-ui'
 import { OpenAPIHono } from '@hono/zod-openapi'
 import type { AuthService } from '@voice/auth'
-import type { LocationService, ReservationService } from '@voice/database'
+import type { LocationStore, ReservationStore } from '@voice/database'
 import type { RemoteResource } from '@voice/resource-manager'
 import { cors } from 'hono/cors'
 import { AllowedOrigin, Authenticated, requestId } from './http/middleware.js'
 import {
-  errorHandler,
+  internalErrHandler,
   invalidRequestHook,
   notFoundHandler,
 } from './http/responses.js'
+import { addRoute } from './http/route.js'
+import { loginRoute, logoutRoute, refreshRoute } from './routes/auth.js'
+import { liveRoute, readyRoute } from './routes/health.js'
+import { saveLocationRoute } from './routes/location.js'
+import { confirmReservationRoute } from './routes/reservations.js'
+import { streamUiEventsRoute } from './routes/ui-events.js'
 import {
-  loginHandler,
-  loginRoute,
-  logoutHandler,
-  logoutRoute,
-  refreshHandler,
-  refreshRoute,
-} from './routes/auth.js'
-import {
-  liveHandler,
-  liveRoute,
-  readyHandler,
-  readyRoute,
-} from './routes/health.js'
-import { saveLocationHandler, saveLocationRoute } from './routes/location.js'
-import {
-  activeReservationHandler,
-  activeReservationRoute,
-  confirmReservationHandler,
-  confirmReservationRoute,
-} from './routes/reservations.js'
-import {
-  createVoiceHandler,
-  createVoiceRoute,
-  endVoiceHandler,
-  endVoiceRoute,
-  transcriptsHandler,
-  transcriptsRoute,
-  voiceStatusHandler,
-  voiceStatusRoute,
+  createVoiceSessionRoute,
+  endVoiceSessionRoute,
+  getVoiceSessionRoute,
 } from './routes/voice.js'
-import { voiceUiEventsHandler } from './routes/voice-ui-events.js'
 import type { VoiceSessionManager } from './voice/session-manager.js'
 
 export type ApiEnv = {
@@ -50,10 +29,10 @@ export type ApiEnv = {
   }
 }
 
-export type ApiDependencies = {
+type ApiDependencies = {
   voice: VoiceSessionManager
-  location: LocationService
-  reservations: ReservationService
+  location: LocationStore
+  reservations: ReservationStore
   auth: AuthService
   resources: RemoteResource<Record<string, string>>
   allowedOrigin: string
@@ -98,24 +77,22 @@ export function createApp({
   app.use('/v1/location', Authenticated(auth))
   app.use('/v1/reservations*', AllowedOrigin(allowedOrigin))
   app.use('/v1/reservations*', Authenticated(auth))
-  app.onError(errorHandler)
+  app.onError(internalErrHandler)
   app.notFound(notFoundHandler)
 
-  app.openapi(liveRoute, liveHandler)
-  app.openapi(readyRoute, readyHandler(resources, isShuttingDown))
-  app.openapi(loginRoute, loginHandler(auth, { secure: cookieSecure }))
-  app.openapi(refreshRoute, refreshHandler(auth))
-  app.openapi(logoutRoute, logoutHandler({ secure: cookieSecure }))
+  addRoute(app, liveRoute)
+  addRoute(app, readyRoute(resources, isShuttingDown))
+  addRoute(app, loginRoute(auth, { secure: cookieSecure }))
+  addRoute(app, refreshRoute(auth))
+  addRoute(app, logoutRoute({ secure: cookieSecure }))
 
-  app.openapi(createVoiceRoute, createVoiceHandler(voice, isShuttingDown))
-  app.openapi(endVoiceRoute, endVoiceHandler(voice))
-  app.openapi(voiceStatusRoute, voiceStatusHandler(voice))
-  app.openapi(transcriptsRoute, transcriptsHandler(voice))
+  addRoute(app, createVoiceSessionRoute(voice, isShuttingDown))
+  addRoute(app, endVoiceSessionRoute(voice))
+  addRoute(app, getVoiceSessionRoute(voice))
+  addRoute(app, streamUiEventsRoute(voice))
 
-  app.openapi(saveLocationRoute, saveLocationHandler(location))
-  app.get('/v1/voice/sessions/:id/ui-events', voiceUiEventsHandler(voice))
-  app.openapi(activeReservationRoute, activeReservationHandler(reservations))
-  app.openapi(confirmReservationRoute, confirmReservationHandler(reservations))
+  addRoute(app, saveLocationRoute(location))
+  addRoute(app, confirmReservationRoute(reservations))
 
   app.doc('/openapi.json', {
     openapi: '3.0.0',

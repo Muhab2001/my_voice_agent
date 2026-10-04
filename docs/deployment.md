@@ -79,7 +79,7 @@ are required.
    header, reload the page, and verify that the session restores. This checks
    whether the external rewrite forwards the refresh cookie as expected.
 3. Start a voice session and test microphone permission, speech, captions,
-   stopping, live UI events, and transcript retrieval. HTTPS is required for
+   stopping, and live UI events. HTTPS is required for
    microphone and geolocation in regular browsers. Test any new hotel workflow only after
    its code and migrations have been deployed.
 

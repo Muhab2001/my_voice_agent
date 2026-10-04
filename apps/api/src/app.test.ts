@@ -73,6 +73,9 @@ describe('phase 1 API', () => {
     }
     expect(doc.paths['/v1/auth/login']).toBeDefined()
     expect(doc.paths['/v1/auth/refresh']).toBeDefined()
+    expect(doc.paths['/v1/voice/sessions/{id}/ui-events']).toBeDefined()
+    expect(doc.paths['/v1/voice/sessions/{id}/transcripts']).toBeUndefined()
+    expect(doc.paths['/v1/reservations/active']).toBeUndefined()
   })
 
   test('login, refresh, logout, and token types', async () => {
@@ -177,6 +180,20 @@ describe('phase 1 API', () => {
     expect(body.error.requestId).toBe(
       response.headers.get('X-Request-Id') ?? '',
     )
+  })
+
+  test('unknown routes return a structured 404', async () => {
+    const { app } = new AppFixture()
+    const response = await app.request('/v1/unknown')
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'not_found',
+        message: 'Route not found',
+        requestId: response.headers.get('X-Request-Id'),
+      },
+    })
   })
 })
 

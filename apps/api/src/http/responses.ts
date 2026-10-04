@@ -33,7 +33,7 @@ export function fail<S extends 400 | 401 | 403 | 404 | 503>(
   )
 }
 
-export const errorHandler: ErrorHandler<ApiEnv> = (error, c) => {
+export const internalErrHandler: ErrorHandler<ApiEnv> = (error, c) => {
   console.error('Request failed', {
     requestId: c.get('requestId'),
     error: error.message,

@@ -1,13 +1,13 @@
-import { createRoute, type RouteHandler } from '@hono/zod-openapi'
 import type { AuthService } from '@voice/auth'
-import { authResponseSchema, loginSchema } from '@voice/contracts'
+import { authResponseSchema } from '@voice/contracts'
 import { getCookie, setCookie } from 'hono/cookie'
-import type { ApiEnv } from '../app.js'
+import { z } from 'zod'
 import { errorResponse, fail, jsonResponse } from '../http/responses.js'
+import { route } from '../http/route.js'
 
 const refreshCookie = 'voice_refresh'
 
-export type CookiePolicy = {
+type CookiePolicy = {
   secure: boolean
 }
 
@@ -20,76 +20,86 @@ function cookieOptions(policy: CookiePolicy) {
   }
 }
 
-export const loginRoute = createRoute({
-  method: 'post',
-  path: '/v1/auth/login',
-  request: { body: jsonResponse(loginSchema) },
-  responses: {
-    200: jsonResponse(authResponseSchema),
-    400: errorResponse,
-    401: errorResponse,
-    403: errorResponse,
-  },
-})
+// Exchanges the operator password for an access token and refresh cookie.
+export const loginRoute = (auth: AuthService, policy: CookiePolicy) =>
+  route(
+    {
+      method: 'post',
+      path: '/v1/auth/login',
+      request: {
+        body: jsonResponse(
+          z
+            .object({ password: z.string().min(1).max(1024) })
+            .openapi('LoginRequest'),
+        ),
+      },
+      responses: {
+        200: jsonResponse(authResponseSchema),
+        400: errorResponse,
+        401: errorResponse,
+        403: errorResponse,
+      },
+    },
+    async (c) => {
+      const { password } = c.req.valid('json')
 
-export const refreshRoute = createRoute({
-  method: 'post',
-  path: '/v1/auth/refresh',
-  responses: {
-    200: jsonResponse(authResponseSchema),
-    401: errorResponse,
-    403: errorResponse,
-  },
-})
+      if (!auth.checkPassword(password)) {
+        return fail(c, 401, 'invalid_credentials', 'Invalid credentials')
+      }
 
-export const logoutRoute = createRoute({
-  method: 'post',
-  path: '/v1/auth/logout',
-  responses: { 204: { description: 'Cookie cleared' }, 403: errorResponse },
-})
+      const [access, refresh] = await Promise.all([
+        auth.issueAccess(),
+        auth.issueRefresh(),
+      ])
 
-export const loginHandler =
-  (
-    auth: AuthService,
-    policy: CookiePolicy,
-  ): RouteHandler<typeof loginRoute, ApiEnv> =>
-  async (c) => {
-    const { password } = c.req.valid('json')
-    if (!auth.checkPassword(password)) {
-      return fail(c, 401, 'invalid_credentials', 'Invalid credentials')
-    }
+      setCookie(c, refreshCookie, refresh, {
+        ...cookieOptions(policy),
+        maxAge: 7 * 24 * 60 * 60,
+      })
 
-    const [access, refresh] = await Promise.all([
-      auth.issueAccess(),
-      auth.issueRefresh(),
-    ])
-    setCookie(c, refreshCookie, refresh, {
-      ...cookieOptions(policy),
-      maxAge: 7 * 24 * 60 * 60,
-    })
-    return c.json(access, 200)
-  }
+      return c.json(access, 200)
+    },
+  )
 
-export const refreshHandler =
-  (auth: AuthService): RouteHandler<typeof refreshRoute, ApiEnv> =>
-  async (c) => {
-    const token = getCookie(c, refreshCookie)
-    if (!token) {
-      return fail(c, 401, 'unauthorized', 'Invalid refresh token')
-    }
+// Issues a new access token from the refresh cookie.
+export const refreshRoute = (auth: AuthService) =>
+  route(
+    {
+      method: 'post',
+      path: '/v1/auth/refresh',
+      responses: {
+        200: jsonResponse(authResponseSchema),
+        401: errorResponse,
+        403: errorResponse,
+      },
+    },
+    async (c) => {
+      const token = getCookie(c, refreshCookie)
 
-    try {
-      await auth.verifyRefresh(token)
-    } catch {
-      return fail(c, 401, 'unauthorized', 'Invalid refresh token')
-    }
+      if (!token) {
+        return fail(c, 401, 'unauthorized', 'Invalid refresh token')
+      }
 
-    return c.json(await auth.issueAccess(), 200)
-  }
+      try {
+        await auth.verifyRefresh(token)
+      } catch {
+        return fail(c, 401, 'unauthorized', 'Invalid refresh token')
+      }
 
-export const logoutHandler =
-  (policy: CookiePolicy): RouteHandler<typeof logoutRoute, ApiEnv> =>
-  (c) => {
-    setCookie(c, refreshCookie, '', { ...cookieOptions(policy), maxAge: 0 })
-    return c.body(null, 204)
-  }
+      return c.json(await auth.issueAccess(), 200)
+    },
+  )
+
+// Clears the browser's refresh cookie.
+export const logoutRoute = (policy: CookiePolicy) =>
+  route(
+    {
+      method: 'post',
+      path: '/v1/auth/logout',
+      responses: { 204: { description: 'Cookie cleared' }, 403: errorResponse },
+    },
+    (c) => {
+      setCookie(c, refreshCookie, '', { ...cookieOptions(policy), maxAge: 0 })
+      return c.body(null, 204)
+    },
+  )

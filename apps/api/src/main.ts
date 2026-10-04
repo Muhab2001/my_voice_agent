@@ -1,16 +1,14 @@
 import { AuthService } from '@voice/auth'
-import {
-  DrizzleLocationService,
-  DrizzleMemoryService,
-  DrizzleReservationService,
-  DrizzleTranscriptService,
-  DrizzleVoiceSessionService,
-  newDrizzleDatabase,
-} from '@voice/database'
+import { newDrizzleDatabase } from '@voice/database'
 import { ResourceManager } from '@voice/resource-manager'
 import { createApp } from './app.js'
 import { loadEnv } from './env.js'
 import { type ServerState, startApiServer } from './server.js'
+import { LocationService } from './services/location-service.js'
+import { MemoryService } from './services/memory-service.js'
+import { ReservationService } from './services/reservation-service.js'
+import { TranscriptService } from './services/transcript-service.js'
+import { VoiceSessionService } from './services/voice-session-service.js'
 import { GooglePlacesService } from './voice/places.js'
 import { GPTLiveVoiceChatProvider } from './voice/provider.js'
 import { VoiceSessionManager } from './voice/session-manager.js'
@@ -25,19 +23,7 @@ const database = newDrizzleDatabase({
   queryTimeoutMs: env.DATABASE_QUERY_TIMEOUT_MS,
   maxLifetimeSeconds: env.DATABASE_MAX_LIFETIME_SECONDS,
 })
-const resources = new ResourceManager({
-  database: database.resource,
-})
-
-const startupReport = await resources.ping()
-if (!startupReport.healthy) {
-  await resources
-    .close()
-    .catch((closeError) => console.error('Startup cleanup failed', closeError))
-  throw new Error(
-    `Required resources are unavailable: ${JSON.stringify(startupReport.details)}`,
-  )
-}
+let resources: ResourceManager | undefined
 
 try {
   const auth = new AuthService({
@@ -48,17 +34,30 @@ try {
   })
 
   const state: ServerState = { shuttingDown: false }
-  const location = new DrizzleLocationService(database.client)
-  const reservations = new DrizzleReservationService(database.client)
+  const location = new LocationService(database.client)
+  const reservations = new ReservationService(database.client)
   const voice = new VoiceSessionManager(
-    new DrizzleVoiceSessionService(database.client),
-    new DrizzleMemoryService(database.client),
-    new DrizzleTranscriptService(database.client),
+    new VoiceSessionService(database.client),
+    new MemoryService(database.client),
+    new TranscriptService(database.client),
     new GPTLiveVoiceChatProvider(env.OPENAI_API_KEY),
     location,
     new GooglePlacesService(env.GOOGLE_MAPS_API_KEY),
     reservations,
   )
+  resources = new ResourceManager({
+    database: database.resource,
+    voice,
+  })
+
+  const startupReport = await resources.ping()
+
+  if (!startupReport.healthy) {
+    throw new Error(
+      `Required resources are unavailable: ${JSON.stringify(startupReport.details)}`,
+    )
+  }
+
   const app = createApp({
     voice,
     location,
@@ -72,7 +71,7 @@ try {
 
   startApiServer(app, resources, env.PORT, state, voice)
 } catch (error) {
-  await resources
+  await (resources ?? database.resource)
     .close()
     .catch((closeError) => console.error('Startup cleanup failed', closeError))
   throw error

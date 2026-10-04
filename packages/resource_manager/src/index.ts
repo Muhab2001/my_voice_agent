@@ -34,17 +34,15 @@ export class ResourceManager implements RemoteResource<Record<string, string>> {
   }
 
   async close(): Promise<void> {
-    const results = await Promise.allSettled(
-      Object.values(this.resources)
-        .reverse()
-        .map((resource) => resource.close()),
-    )
-    const failures = results
-      .filter(
-        (result): result is PromiseRejectedResult =>
-          result.status === 'rejected',
-      )
-      .map((result) => result.reason)
+    const failures: unknown[] = []
+
+    for (const resource of Object.values(this.resources).reverse()) {
+      try {
+        await resource.close()
+      } catch (error) {
+        failures.push(error)
+      }
+    }
 
     if (failures.length > 0) {
       throw new AggregateError(failures, 'Failed to close remote resources')

@@ -6,7 +6,7 @@ import {
   voiceFixture,
 } from '../testing/voice-fixture.js'
 
-test('voice routes authenticate, validate, expose local transcripts and reject creation while draining', async () => {
+test('voice routes authenticate, validate, persist transcripts and reject creation while draining', async () => {
   const { manager, socket, location } = voiceFixture()
   const auth = new AuthService({
     password: 'correct-password',
@@ -66,11 +66,10 @@ test('voice routes authenticate, validate, expose local transcripts and reject c
     (await app.request(`${path}/${id}/end`, { method: 'POST', headers }))
       .status,
   ).toBe(204)
-  const snapshots = await app.request(`${path}/${id}/transcripts`, { headers })
+  expect((await manager.transcripts(id))[0]?.text).toBe('Hi!')
   expect(
-    ((await snapshots.json()) as { snapshots: { text: string }[] }).snapshots[0]
-      .text,
-  ).toBe('Hi!')
+    (await app.request(`${path}/${id}/transcripts`, { headers })).status,
+  ).toBe(404)
   expect(
     (await app.request(`${path}/${crypto.randomUUID()}`, { headers })).status,
   ).toBe(404)

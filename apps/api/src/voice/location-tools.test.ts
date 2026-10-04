@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { LocationService, SavedLocation } from '@voice/database'
+import type { LocationStore, SavedLocation } from '@voice/database'
 import type { PlacesService } from './places.js'
 import { executeLocationTool } from './tools.js'
 import { UIEventChannel } from './ui-event-channel.js'
@@ -19,7 +19,7 @@ test('nearby tool emits its card without storing it on the server', async () => 
     accuracyMeters: 20,
     recordedAt: new Date('2020-01-01T00:00:00Z'),
   }
-  const location: LocationService = {
+  const location: LocationStore = {
     latest: async () => saved,
     save: async () => {
       throw new Error('unexpected save')
@@ -65,7 +65,7 @@ test('hotel, park, and other searches accept a wider radius and publish distinct
     accuracyMeters: 20,
     recordedAt: new Date(),
   }
-  const location: LocationService = {
+  const location: LocationStore = {
     latest: async () => saved,
     save: async () => saved,
   }

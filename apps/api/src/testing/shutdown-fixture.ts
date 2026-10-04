@@ -1,4 +1,5 @@
 import { AuthService } from '@voice/auth'
+import { ResourceManager } from '@voice/resource-manager'
 import { createApp } from '../app.js'
 import { type ServerState, startApiServer } from '../server.js'
 import { functionCall, voiceFixture } from './voice-fixture.js'
@@ -23,16 +24,23 @@ if (process.env.VOICE_SHUTDOWN === 'true') {
   console.log(`Voice session ready: ${id}`)
 }
 
-const resources = {
-  ping: async () => ({ healthy: true, details: {} }),
-  close: async () => {
-    if (process.env.VOICE_SHUTDOWN === 'true') {
-      console.log(
-        `Closed resources after memory=${voice.memory.facts.length} transcript=${voice.transcripts.chunks.size} finalization=${[...voice.sessions.rows.values()][0].finalization}`,
-      )
-    }
+const resources = new ResourceManager({
+  database: {
+    ping: async () => ({ healthy: true, details: 'Test database is ready' }),
+    close: async () => {
+      if (process.env.STALL_RESOURCE === 'true') {
+        await new Promise<void>(() => {})
+      }
+
+      if (process.env.VOICE_SHUTDOWN === 'true') {
+        console.log(
+          `Closed resources after memory=${voice.memory.facts.length} transcript=${voice.transcripts.chunks.size} finalization=${[...voice.sessions.rows.values()][0].finalization}`,
+        )
+      }
+    },
   },
-}
+  voice: voice.manager,
+})
 const state: ServerState = { shuttingDown: false }
 const auth = new AuthService({
   password: 'correct-password',

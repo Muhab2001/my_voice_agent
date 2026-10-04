@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { MemoryService } from '@voice/database'
+import type { MemoryStore } from '@voice/database'
 import {
   eventually,
   functionCall,
@@ -530,7 +530,7 @@ test('missing persistence service rejects runtime construction', () => {
     () =>
       new VoiceSessionManager(
         sessions,
-        undefined as unknown as MemoryService,
+        undefined as unknown as MemoryStore,
         transcripts,
         provider,
         location,

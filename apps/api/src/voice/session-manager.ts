@@ -1,13 +1,14 @@
 import {
-  type LocationService,
-  type MemoryService,
+  type LocationStore,
+  type MemoryStore,
   ReservationError,
-  type ReservationService,
+  type ReservationStore,
   type SessionUpdate,
   type Snapshot,
-  type TranscriptService,
-  type VoiceSessionService,
+  type TranscriptStore,
+  type VoiceSessionStore,
 } from '@voice/database'
+import type { RemoteResource } from '@voice/resource-manager'
 import {
   type EventOf,
   type ResponseEvent,
@@ -110,7 +111,7 @@ export type VoiceSessionManagerOptions = {
 }
 
 /** Owns provider transports, delegated tool work and transcript flushes through finalization. */
-export class VoiceSessionManager {
+export class VoiceSessionManager implements RemoteResource {
   private active = new Map<string, ActiveSession>()
   readonly uiEventChannel = new UIEventChannel()
 
@@ -119,14 +120,27 @@ export class VoiceSessionManager {
 
   private draining = false
 
+  async ping() {
+    return {
+      healthy: !this.draining,
+      details: this.draining
+        ? 'Voice sessions are draining'
+        : 'Voice sessions are ready',
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.drain()
+  }
+
   constructor(
-    private readonly sessions: VoiceSessionService,
-    private readonly memory: MemoryService,
-    private readonly transcriptService: TranscriptService,
+    private readonly sessions: VoiceSessionStore,
+    private readonly memory: MemoryStore,
+    private readonly transcriptService: TranscriptStore,
     private readonly voice: VoiceChatProvider,
-    private readonly location: LocationService,
+    private readonly location: LocationStore,
     private readonly places: PlacesService,
-    private readonly reservations: ReservationService,
+    private readonly reservations: ReservationStore,
     private options: VoiceSessionManagerOptions = {},
   ) {
     const dependencies = {

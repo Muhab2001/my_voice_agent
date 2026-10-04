@@ -50,10 +50,11 @@ export function startApiServer(
     )
 
     let drainTimeout: ReturnType<typeof setTimeout> | undefined
-    const drained = Promise.all([
-      server.stop(),
-      voice.drain(shutdownDeadline - 3000),
-    ])
+    const drained = Promise.all([server.stop(), resources.close()]).finally(
+      () => {
+        clearTimeout(hardTimeout)
+      },
+    )
     const deadline = new Promise<void>((resolve) => {
       drainTimeout = setTimeout(
         () => {
@@ -69,9 +70,6 @@ export function startApiServer(
 
     try {
       await Promise.race([drained, deadline])
-      clearTimeout(drainTimeout)
-      await resources.close()
-      clearTimeout(hardTimeout)
     } finally {
       clearTimeout(drainTimeout)
     }

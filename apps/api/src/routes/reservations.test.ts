@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test'
 import { AuthService } from '@voice/auth'
 import {
   ReservationError,
-  type ReservationService,
   type ReservationState,
+  type ReservationStore,
 } from '@voice/database'
 import { createApp } from '../app.js'
 import { voiceFixture } from '../testing/voice-fixture.js'
@@ -35,7 +35,7 @@ const state: ReservationState = {
   updatedAt: new Date().toISOString(),
 }
 
-class ConfirmationService implements ReservationService {
+class ConfirmationService implements ReservationStore {
   current = state
   async hotels() {
     return []
@@ -81,7 +81,7 @@ class ConfirmationService implements ReservationService {
   }
 }
 
-test('browser can read and confirm, but cannot create or edit reservations over HTTP', async () => {
+test('browser can confirm, but cannot read or edit reservations over HTTP', async () => {
   const auth = new AuthService({
     password: 'correct-password',
     signingSecret: '12345678901234567890123456789012',
@@ -108,10 +108,9 @@ test('browser can read and confirm, but cannot create or edit reservations over 
     authorization: `Bearer ${token}`,
     'content-type': 'application/json',
   }
-  expect((await app.request('/v1/reservations/active')).status).toBe(401)
   expect(
     (await app.request('/v1/reservations/active', { headers })).status,
-  ).toBe(200)
+  ).toBe(404)
   expect(
     (
       await app.request('/v1/reservations', {

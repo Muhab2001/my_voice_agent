@@ -1,10 +1,10 @@
 import { placeCategorySchema } from '@voice/contracts'
 import {
   cityMatchesQuery,
-  type LocationService,
-  type MemoryService,
-  type ReservationService,
+  type LocationStore,
+  type MemoryStore,
   type ReservationState,
+  type ReservationStore,
   todayInBookingTimezone,
   weekdayForStayDate,
 } from '@voice/database'
@@ -238,7 +238,7 @@ const actionArgs = z
   .strict()
 
 export async function executeReservationTool(
-  service: ReservationService,
+  service: ReservationStore,
   ui: UIEventChannel,
   sessionId: string,
   name: string,
@@ -537,7 +537,7 @@ const nearbyArguments = z
   )
 
 export async function executeLocationTool(
-  location: LocationService,
+  location: LocationStore,
   places: PlacesService,
   ui: UIEventChannel,
   sessionId: string,
@@ -586,7 +586,7 @@ export async function executeLocationTool(
   return { places: results, travelMode: args.travel_mode }
 }
 export async function executeMemoryTool(
-  memory: MemoryService,
+  memory: MemoryStore,
   sessionId: string,
   name: string,
   argumentsJson: string,
